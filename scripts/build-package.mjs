@@ -7,6 +7,7 @@ const files = {};
 for (const name of sourceFiles) {
   let content = await readFile(`src/${name}`, "utf8");
   if (name === "index.html") {
+    content = content.replace(/\n?\s*<link[^>]*data-dev-only[^>]*>\s*/g, "\n");
     content = content.replace(/\n\s*<script[^>]*data-dev-only[^>]*><\/script>\s*/g, "\n");
   }
   files[name] = content;

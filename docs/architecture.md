@@ -121,6 +121,7 @@ Hard rules for the content engine:
 - Generated maps are small: 23 x 15 tiles.
 - Save data is plain JSON and scoped to one appdata folder.
 - Local deterministic fallback must always be available.
+- Audio is generated locally with WebAudio from the run seed and story state. It does not stream or store audio files.
 
 Future production budgets:
 
@@ -138,6 +139,7 @@ Current POC modules live in `src/app.js`:
 - `BrowserQwenProvider`: lazy browser model adapter.
 - Procedural director functions: deterministic fallback content.
 - Dungeon engine: local map, turn, combat, item, quest and stair logic.
+- `AdaptiveComposer`: seed-driven WebAudio score and short action sounds.
 - Vault persistence: Shellex SDK save/load wrapper.
 
 Future split:

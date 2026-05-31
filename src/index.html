@@ -1,27 +1,46 @@
+<link rel="stylesheet" href="./style.css" data-dev-only>
 <main class="rogue-shell" data-app>
-  <section class="game-stage" aria-label="Rogue Shell game">
-    <header class="topbar">
-      <div>
+  <section class="game-shell" aria-label="Rogue Shell game">
+    <header class="game-hud">
+      <div class="brand-block">
         <p class="eyebrow">Shellex Vault Game</p>
         <h1>Rogue Shell</h1>
       </div>
-      <div class="engine-pill" data-engine-status>Engine idle</div>
+      <div class="hud-readout">
+        <div class="hud-stat"><span>HP</span><strong data-hp>0/0</strong></div>
+        <div class="hud-stat"><span>XP</span><strong data-xp>0</strong></div>
+        <div class="hud-stat"><span>Gold</span><strong data-gold>0</strong></div>
+        <div class="engine-pill" data-engine-status>Engine idle</div>
+        <button type="button" data-music-toggle>Music On</button>
+      </div>
     </header>
 
-    <section class="setup-panel" data-setup>
-      <div class="setup-copy">
+    <section class="intro-screen" data-setup>
+      <div class="intro-copy">
         <p class="eyebrow">Story Seed</p>
-        <h2>What kind of run should the vault dream up?</h2>
+        <h2>Open a vault below the command line.</h2>
+        <textarea data-story-prompt spellcheck="true">A broken moon has fallen into an encrypted archive. I am a scavenger trying to reach the root directory before rival ghosts rewrite the world.</textarea>
+        <div class="setup-actions">
+          <button type="button" class="primary" data-start>Start Run</button>
+          <button type="button" data-load>Load Vault Save</button>
+        </div>
       </div>
-      <textarea data-story-prompt spellcheck="true">A broken moon has fallen into an encrypted archive. I am a scavenger trying to reach the root directory before rival ghosts rewrite the world.</textarea>
-      <div class="setup-actions">
-        <button type="button" class="primary" data-start>Start Run</button>
-        <button type="button" data-load>Load Vault Save</button>
+      <div class="intro-art" aria-hidden="true">
+        <div class="orbit-ring ring-a"></div>
+        <div class="orbit-ring ring-b"></div>
+        <div class="intro-glyph glyph-player">@</div>
+        <div class="intro-glyph glyph-stairs">&gt;</div>
+        <div class="intro-glyph glyph-relic">*</div>
+        <div class="intro-glyph glyph-wall">#</div>
+        <div class="intro-terminal">
+          <span>root@vault</span>
+          <strong data-intro-line>awaiting story seed</strong>
+        </div>
       </div>
     </section>
 
     <section class="play-layout" data-play hidden>
-      <div class="board-shell">
+      <section class="board-shell" aria-label="Dungeon">
         <div class="board-header">
           <div>
             <p class="eyebrow" data-floor-label>Floor 1</p>
@@ -29,7 +48,9 @@
           </div>
           <div class="turn-chip" data-turn>Turn 0</div>
         </div>
-        <div class="board" data-board tabindex="0" aria-label="Dungeon map"></div>
+        <div class="board-frame">
+          <div class="board" data-board tabindex="0" aria-label="Dungeon map"></div>
+        </div>
         <div class="action-row">
           <button type="button" data-act="up" aria-label="Move up">^</button>
           <button type="button" data-act="left" aria-label="Move left">&lt;</button>
@@ -38,27 +59,21 @@
           <button type="button" data-rest>Rest</button>
           <button type="button" data-next-beat>New Beat</button>
         </div>
-      </div>
+      </section>
 
       <aside class="side-panel" aria-label="Run details">
-        <section class="stat-strip">
-          <div><span>HP</span><strong data-hp>0/0</strong></div>
-          <div><span>XP</span><strong data-xp>0</strong></div>
-          <div><span>Gold</span><strong data-gold>0</strong></div>
-        </section>
-
-        <section class="panel-section">
+        <section class="panel-section quest-section">
           <p class="eyebrow">Quest</p>
           <h3 data-quest-title>No quest</h3>
           <p data-quest-copy></p>
         </section>
 
-        <section class="panel-section">
+        <section class="panel-section pack-section">
           <p class="eyebrow">Pack</p>
           <ul class="inventory" data-inventory></ul>
         </section>
 
-        <section class="panel-section">
+        <section class="panel-section director-section">
           <p class="eyebrow">Director</p>
           <div class="director-grid">
             <label>
@@ -72,12 +87,15 @@
           </div>
           <p class="tiny" data-model-note>Model stays asleep until explicitly warmed.</p>
         </section>
-
-        <section class="panel-section log-section">
-          <p class="eyebrow">Log</p>
-          <ol class="log" data-log></ol>
-        </section>
       </aside>
+
+      <section class="log-dock" aria-label="Run log">
+        <div class="log-header">
+          <p class="eyebrow">Run Log</p>
+          <span data-music-status>seed score ready</span>
+        </div>
+        <ol class="log" data-log></ol>
+      </section>
     </section>
   </section>
 </main>

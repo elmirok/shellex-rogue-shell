@@ -25,15 +25,26 @@ const dom = {
   warmQwen: document.querySelector("[data-warm-qwen]"),
   modelNote: document.querySelector("[data-model-note]"),
   rest: document.querySelector("[data-rest]"),
-  nextBeat: document.querySelector("[data-next-beat]")
+  nextBeat: document.querySelector("[data-next-beat]"),
+  musicToggle: document.querySelector("[data-music-toggle]"),
+  musicStatus: document.querySelector("[data-music-status]"),
+  introLine: document.querySelector("[data-intro-line]")
 };
 
 let state = null;
 let busy = false;
+const fx = {
+  tileKey: "",
+  tileKind: "",
+  revealDepth: 0,
+  revealAt: 0,
+  boardHitUntil: 0
+};
 
 const api = createShellexApi();
 let qwen = null;
 let director = null;
+let composer = null;
 
 function bindUi() {
   dom.start.addEventListener("click", () => startRun());
@@ -41,6 +52,7 @@ function bindUi() {
   dom.rest.addEventListener("click", () => takeRest());
   dom.nextBeat.addEventListener("click", () => requestStoryBeat());
   dom.warmQwen.addEventListener("click", () => warmQwen());
+  dom.musicToggle.addEventListener("click", () => toggleMusic());
   dom.provider.addEventListener("change", () => {
     if (!state) return;
     state.settings.provider = dom.provider.value;
@@ -118,14 +130,17 @@ async function startRun() {
     },
     settings: {
       provider: "procedural",
-      qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct"
+      qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
+      musicEnabled: dom.musicToggle.dataset.enabled !== "false"
     },
     currentFloor: null
   };
 
   showPlay();
+  await startMusic();
   await withBusy("Weaving first floor", async () => {
     await director.ensureStory(state);
+    composer?.update(state);
     await enterFloor(1);
     appendLog(`${state.generated.story.title} begins.`);
     appendLog(state.generated.story.premise);
@@ -142,8 +157,15 @@ async function loadRun() {
     const loaded = JSON.parse(text);
     if (loaded?.schema !== "rogue-shell-save-v1") throw new Error("Unknown save format.");
     state = loaded;
+    state.settings = {
+      provider: "procedural",
+      qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
+      musicEnabled: true,
+      ...(state.settings || {})
+    };
     state.currentFloor = state.currentFloor || state.generated?.floors?.[String(state.floor)] || null;
     showPlay();
+    await startMusic();
     appendLog("Vault save loaded.");
     render();
     focusBoard();
@@ -166,6 +188,7 @@ async function saveRun() {
 function showPlay() {
   dom.setup.hidden = true;
   dom.play.hidden = false;
+  dom.introLine.textContent = "run mounted";
 }
 
 async function enterFloor(depth) {
@@ -174,6 +197,10 @@ async function enterFloor(depth) {
   state.currentFloor = clone(floor);
   state.player.x = state.currentFloor.start.x;
   state.player.y = state.currentFloor.start.y;
+  fx.revealDepth = depth;
+  fx.revealAt = Date.now();
+  if (depth > 1) composer?.sfx("stairs");
+  composer?.update(state);
   appendLog(`Descended into ${state.currentFloor.name}.`);
 }
 
@@ -183,6 +210,8 @@ async function movePlayer(dx, dy) {
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
   if (!isInside(floor, nx, ny) || tileAt(floor, nx, ny) === "#") {
+    markFx("bump", Math.max(0, Math.min(floor.width - 1, nx)), Math.max(0, Math.min(floor.height - 1, ny)));
+    composer?.sfx("bump");
     appendLog("Stone, static and old permissions refuse the path.");
     render();
     return;
@@ -194,6 +223,8 @@ async function movePlayer(dx, dy) {
   } else {
     state.player.x = nx;
     state.player.y = ny;
+    markFx("step", nx, ny);
+    composer?.sfx("move");
     collectItemAt(nx, ny);
     inspectLandmark(nx, ny);
   }
@@ -210,6 +241,8 @@ function attackEnemy(enemy) {
   const rng = rngFor(`combat:${state.seed}:${state.turn}:${enemy.id}`);
   const damage = 3 + Math.floor(rng() * 5) + Math.floor(state.player.xp / 12);
   enemy.hp -= damage;
+  markFx("hit", enemy.x, enemy.y);
+  composer?.sfx("hit");
   appendLog(`You hit ${enemy.name} for ${damage}.`);
   if (enemy.hp <= 0) {
     enemy.dead = true;
@@ -223,6 +256,7 @@ function attackEnemy(enemy) {
   } else {
     const counter = Math.max(1, enemy.atk + Math.floor(rng() * 3) - 1);
     state.player.hp -= counter;
+    fx.boardHitUntil = Date.now() + 220;
     appendLog(`${enemy.name} answers for ${counter}.`);
   }
 }
@@ -233,6 +267,7 @@ function enemyTurn() {
     const distance = Math.abs(enemy.x - state.player.x) + Math.abs(enemy.y - state.player.y);
     if (distance === 1) {
       state.player.hp -= enemy.atk;
+      fx.boardHitUntil = Date.now() + 220;
       appendLog(`${enemy.name} claws at your prompt for ${enemy.atk}.`);
       continue;
     }
@@ -270,6 +305,8 @@ function collectItemAt(x, y) {
     state.inventory.push(item.name);
     appendLog(`You pocket ${item.name}.`);
   }
+  markFx("pickup", x, y);
+  composer?.sfx(item.kind === "heal" ? "heal" : "pickup");
   if (state.generated.story.quest.target === "relic" && item.quest) {
     completeQuest(`${item.name} answers the quest.`);
   }
@@ -299,6 +336,7 @@ async function takeRest() {
     state.player.hp += healed;
     appendLog(`You rest beside the prompt and recover ${healed} HP.`);
   }
+  composer?.sfx("rest");
   state.turn += 1;
   enemyTurn();
   checkDefeat();
@@ -316,6 +354,7 @@ async function requestStoryBeat() {
       state.inventory.push(beat.reward);
       appendLog(`${beat.reward} joins your pack.`);
     }
+    composer?.sfx("beat");
   });
   await saveRun();
   render();
@@ -342,12 +381,14 @@ function completeQuest(message) {
   state.player.xp += 12;
   state.player.maxHp += 4;
   state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
+  composer?.sfx("quest");
   appendLog(`${message} +12 XP, +4 max HP.`);
 }
 
 function checkDefeat() {
   if (state.player.hp > 0) return;
   state.player.hp = 0;
+  composer?.sfx("down");
   appendLog("The run falls silent. Start a new story seed to try again.");
   setEngine("Run ended");
 }
@@ -356,7 +397,9 @@ function render() {
   if (!state || !state.currentFloor) return;
   const floor = state.currentFloor;
   dom.board.style.setProperty("--cols", String(floor.width));
+  dom.board.classList.toggle("board-hit", Date.now() < fx.boardHitUntil);
   dom.board.innerHTML = "";
+  const reveal = fx.revealDepth === floor.depth && Date.now() - fx.revealAt < 1600;
   for (let y = 0; y < floor.height; y += 1) {
     for (let x = 0; x < floor.width; x += 1) {
       const tile = document.createElement("div");
@@ -386,7 +429,14 @@ function render() {
         glyph = "@";
         kind = "player";
       }
-      tile.className = `tile ${kind}`;
+      const classes = ["tile", kind];
+      if (reveal) {
+        classes.push("reveal");
+        const delay = Math.min(420, (Math.abs(x - state.player.x) + Math.abs(y - state.player.y)) * 22);
+        tile.style.setProperty("--delay", `${delay}ms`);
+      }
+      if (fx.tileKey === coordKey(x, y)) classes.push(`fx-${fx.tileKind}`);
+      tile.className = classes.join(" ");
       tile.textContent = glyph;
       tile.title = describeTile(kind, enemy, item, landmark);
       dom.board.append(tile);
@@ -406,12 +456,13 @@ function render() {
   dom.inventory.innerHTML = state.inventory.length
     ? state.inventory.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
     : "<li>Empty</li>";
-  dom.log.innerHTML = state.log.slice(-12).map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  dom.log.innerHTML = state.log.slice(-10).reverse().map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   dom.modelNote.textContent = qwen.ready
     ? "Browser Qwen is warm."
     : state.settings.provider === "qwen"
       ? "Warm Qwen before uncached generation."
       : "Pocket generator is active.";
+  syncMusicButton();
 }
 
 function describeTile(kind, enemy, item, landmark) {
@@ -427,6 +478,53 @@ function appendLog(line) {
   if (!state) return;
   state.log.push(line);
   if (state.log.length > 80) state.log = state.log.slice(-80);
+}
+
+function markFx(kind, x, y) {
+  fx.tileKind = kind;
+  fx.tileKey = coordKey(x, y);
+}
+
+async function toggleMusic() {
+  if (!state) {
+    composer = composer || new AdaptiveComposer();
+    const enabled = dom.musicToggle.dataset.enabled !== "false";
+    dom.musicToggle.dataset.enabled = enabled ? "false" : "true";
+    dom.musicToggle.textContent = enabled ? "Music Off" : "Music On";
+    dom.musicStatus.textContent = enabled ? "score muted" : "seed score armed";
+    if (enabled) composer.stop();
+    return;
+  }
+  state.settings.musicEnabled = !state.settings.musicEnabled;
+  if (state.settings.musicEnabled) await startMusic();
+  else composer?.stop();
+  await saveRun();
+  syncMusicButton();
+}
+
+async function startMusic() {
+  if (!state?.settings?.musicEnabled) {
+    syncMusicButton();
+    return;
+  }
+  composer = composer || new AdaptiveComposer();
+  try {
+    await composer.start(state);
+    syncMusicButton();
+  } catch (error) {
+    dom.musicStatus.textContent = "audio unavailable";
+    state.settings.musicEnabled = false;
+    syncMusicButton();
+  }
+}
+
+function syncMusicButton() {
+  const enabled = state?.settings?.musicEnabled ?? dom.musicToggle.dataset.enabled !== "false";
+  dom.musicToggle.textContent = enabled ? "Music On" : "Music Off";
+  dom.musicToggle.dataset.enabled = enabled ? "true" : "false";
+  if (!composer?.playing) {
+    dom.musicStatus.textContent = enabled ? "seed score armed" : "score muted";
+  }
 }
 
 function focusBoard() {
@@ -450,6 +548,7 @@ async function withBusy(label, task) {
 
 function setEngine(message) {
   dom.engineStatus.textContent = message;
+  syncMusicButton();
 }
 
 function tileAt(floor, x, y) {
@@ -466,6 +565,127 @@ function findEnemy(x, y) {
 
 function livingEnemies() {
   return state.currentFloor.enemies.filter((enemy) => !enemy.dead);
+}
+
+class AdaptiveComposer {
+  constructor() {
+    this.context = null;
+    this.master = null;
+    this.timer = null;
+    this.playing = false;
+    this.step = 0;
+    this.tempo = 82;
+    this.root = 130.81;
+    this.scale = [0, 2, 3, 5, 7, 9, 10, 12];
+    this.motif = [0, 2, 4, 5, 3, 1, 2, 6];
+    this.wave = "triangle";
+  }
+
+  async start(run) {
+    const AudioCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtor) throw new Error("WebAudio is unavailable.");
+    if (!this.context) {
+      this.context = new AudioCtor();
+      this.master = this.context.createGain();
+      this.master.gain.value = 0.0001;
+      this.master.connect(this.context.destination);
+    }
+    this.update(run);
+    await this.context.resume();
+    this.master.gain.setTargetAtTime(0.055, this.context.currentTime, 0.28);
+    this.playing = true;
+    this.restartClock();
+    dom.musicStatus.textContent = "seed score playing";
+  }
+
+  update(run) {
+    if (!run) return;
+    const story = run.generated?.story;
+    const source = `${run.storyPrompt}:${story?.title || ""}:${run.floor || 1}`;
+    const rng = rngFor(`music:${hashString(source)}`);
+    const roots = [98, 110, 123.47, 130.81, 146.83, 164.81];
+    const modes = [
+      [0, 2, 3, 5, 7, 8, 10, 12],
+      [0, 2, 3, 5, 7, 9, 10, 12],
+      [0, 2, 4, 7, 9, 12, 14, 16],
+      [0, 1, 5, 7, 8, 12, 13, 17]
+    ];
+    this.root = choice(rng, roots);
+    this.scale = choice(rng, modes);
+    this.tempo = 68 + Math.floor(rng() * 32) + Math.min(16, (run.floor || 1) * 2);
+    this.wave = rng() > 0.55 ? "triangle" : "sine";
+    this.motif = Array.from({ length: 12 }, () => Math.floor(rng() * this.scale.length));
+    if (this.playing) this.restartClock();
+  }
+
+  restartClock() {
+    if (this.timer) window.clearInterval(this.timer);
+    const beatMs = 60000 / this.tempo / 2;
+    this.timer = window.setInterval(() => this.tick(), beatMs);
+  }
+
+  stop() {
+    if (this.timer) window.clearInterval(this.timer);
+    this.timer = null;
+    this.playing = false;
+    if (this.master && this.context) {
+      this.master.gain.setTargetAtTime(0.0001, this.context.currentTime, 0.14);
+    }
+    dom.musicStatus.textContent = "score muted";
+  }
+
+  tick() {
+    if (!this.context || !this.master || !this.playing) return;
+    const index = this.step % this.motif.length;
+    const degree = this.motif[index];
+    const octave = index % 7 === 0 ? 2 : 1;
+    const freq = this.noteFrequency(degree, octave);
+    this.tone(freq, 0.16, this.wave, 0.055);
+    if (this.step % 4 === 0) this.tone(this.noteFrequency(0, 0), 0.42, "sine", 0.04);
+    if (this.step % 8 === 6) this.tone(this.noteFrequency(4, 1), 0.22, "square", 0.018);
+    this.step += 1;
+  }
+
+  sfx(kind) {
+    if (!this.context || !this.master) return;
+    if (kind === "move") this.tone(this.noteFrequency(2, 2), 0.045, "sine", 0.03);
+    if (kind === "bump") this.tone(72, 0.07, "sawtooth", 0.045);
+    if (kind === "hit") this.tone(this.noteFrequency(5, 2), 0.09, "square", 0.055);
+    if (kind === "pickup") this.arpeggio([2, 4, 6], 0.05, 0.038);
+    if (kind === "heal") this.arpeggio([0, 2, 4, 7], 0.055, 0.035);
+    if (kind === "stairs") this.arpeggio([0, 3, 5, 7, 10], 0.075, 0.045);
+    if (kind === "rest") this.tone(this.noteFrequency(0, 1), 0.28, "sine", 0.035);
+    if (kind === "beat") this.arpeggio([1, 3, 5], 0.07, 0.03);
+    if (kind === "quest") this.arpeggio([0, 2, 4, 6, 8], 0.08, 0.05);
+    if (kind === "down") this.arpeggio([5, 3, 1, 0], 0.11, 0.04);
+  }
+
+  arpeggio(degrees, duration, gain) {
+    degrees.forEach((degree, index) => {
+      this.tone(this.noteFrequency(degree, 2), duration, "triangle", gain, index * duration * 0.72);
+    });
+  }
+
+  noteFrequency(degree, octave) {
+    const semitone = this.scale[Math.abs(degree) % this.scale.length] + octave * 12;
+    return this.root * Math.pow(2, semitone / 12);
+  }
+
+  tone(freq, duration, type, gainValue, delay = 0) {
+    if (!this.context || !this.master) return;
+    const start = this.context.currentTime + delay;
+    const osc = this.context.createOscillator();
+    const gain = this.context.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, start);
+    gain.gain.setValueAtTime(0.0001, start);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, gainValue), start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+    osc.connect(gain);
+    gain.connect(this.master);
+    osc.start(start);
+    osc.stop(start + duration + 0.03);
+  }
 }
 
 class ContentDirector {

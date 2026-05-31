@@ -29,6 +29,8 @@ For local testing, use Shellex `install-app` and choose `package.sapp.json`.
 - Scoped vault storage at `/appdata/games.rogue-shell.local`.
 - Playable turn-based dungeon map with keyboard and button movement.
 - Story prompt, generated story bible, generated floors, generated quests, items and enemies.
+- Fixed viewport game surface with intro screen, always-visible run log and animated tiles.
+- Seed-generated adaptive WebAudio music and action sound effects.
 - Lazy content director: story on new run, floor chunks on stairs, beats on request.
 - Browser Qwen adapter is explicit and lazy; it never loads at app boot.
 - Procedural fallback keeps the POC playable when browser model loading is unavailable.
