@@ -1,0 +1,382 @@
+:root {
+  color-scheme: dark;
+  --ink: #f4f1e8;
+  --muted: #a7b0b2;
+  --panel: #121619;
+  --panel-2: #191f21;
+  --line: #324046;
+  --green: #7ee787;
+  --cyan: #75d7ff;
+  --amber: #ffcc66;
+  --rose: #ff7b90;
+  --violet: #b69cff;
+  --shadow: rgba(0, 0, 0, 0.38);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0a0d0f;
+  color: var(--ink);
+}
+
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+select {
+  border: 1px solid var(--line);
+  background: #182025;
+  color: var(--ink);
+  border-radius: 6px;
+}
+
+button {
+  min-height: 38px;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+button:hover,
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.board:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+button.primary {
+  border-color: #3d7a55;
+  background: #1d4b36;
+}
+
+.rogue-shell {
+  min-height: 100vh;
+  padding: 18px;
+  background:
+    linear-gradient(120deg, rgba(126, 231, 135, 0.08), transparent 35%),
+    linear-gradient(260deg, rgba(255, 123, 144, 0.07), transparent 38%),
+    #0a0d0f;
+}
+
+.game-stage {
+  max-width: 1220px;
+  min-height: calc(100vh - 36px);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.topbar,
+.board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.topbar {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: clamp(30px, 5vw, 48px);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 22px;
+  line-height: 1.18;
+  letter-spacing: 0;
+}
+
+h3 {
+  font-size: 17px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.eyebrow,
+.tiny {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0;
+  margin-bottom: 4px;
+}
+
+.engine-pill,
+.turn-chip {
+  border: 1px solid var(--line);
+  background: #101518;
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+
+.setup-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr);
+  gap: 16px;
+  align-items: stretch;
+  border: 1px solid var(--line);
+  background: rgba(18, 22, 25, 0.94);
+  box-shadow: 0 20px 50px var(--shadow);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.setup-copy {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #0d1114;
+  color: var(--ink);
+  padding: 12px;
+  line-height: 1.45;
+}
+
+.setup-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.play-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(290px, 360px);
+  gap: 14px;
+  min-height: 0;
+}
+
+.board-shell,
+.side-panel {
+  border: 1px solid var(--line);
+  background: rgba(18, 22, 25, 0.94);
+  box-shadow: 0 20px 50px var(--shadow);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.board-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.board {
+  --cols: 23;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(18px, 1fr));
+  gap: 3px;
+  width: 100%;
+  aspect-ratio: 23 / 15;
+  max-height: min(64vh, 680px);
+  border: 1px solid #263238;
+  background: #080b0d;
+  border-radius: 6px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.tile {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: clamp(11px, 1.6vw, 18px);
+  line-height: 1;
+  color: #76848a;
+  background: #101519;
+}
+
+.tile.wall {
+  color: #526068;
+  background: #1b2328;
+}
+
+.tile.floor {
+  background: #0f1417;
+}
+
+.tile.player {
+  color: #08110c;
+  background: var(--green);
+  font-weight: 800;
+}
+
+.tile.enemy {
+  color: #1d070c;
+  background: var(--rose);
+  font-weight: 800;
+}
+
+.tile.item {
+  color: #1a1200;
+  background: var(--amber);
+  font-weight: 800;
+}
+
+.tile.stairs {
+  color: #07131a;
+  background: var(--cyan);
+  font-weight: 800;
+}
+
+.tile.landmark {
+  color: #110d23;
+  background: var(--violet);
+  font-weight: 800;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-row button {
+  min-width: 42px;
+}
+
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  overflow: auto;
+}
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.stat-strip div,
+.panel-section {
+  border: 1px solid #2a373d;
+  background: var(--panel-2);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.stat-strip span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat-strip strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 18px;
+  color: var(--green);
+}
+
+.panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.inventory,
+.log {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.inventory li,
+.log li {
+  margin: 0 0 6px;
+  color: #d9e0df;
+  line-height: 1.35;
+}
+
+.director-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.log-section {
+  flex: 1;
+  min-height: 150px;
+}
+
+@media (max-width: 860px) {
+  .rogue-shell {
+    padding: 10px;
+  }
+
+  .setup-panel,
+  .play-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-actions {
+    grid-column: 1;
+  }
+
+  .board {
+    grid-template-columns: repeat(var(--cols), minmax(12px, 1fr));
+    padding: 5px;
+    gap: 2px;
+  }
+
+  .topbar,
+  .board-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

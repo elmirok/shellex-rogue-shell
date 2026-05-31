@@ -1,0 +1,11 @@
+{
+  "name": "shellex-rogue-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-package.mjs",
+    "check": "node scripts/check-package.mjs",
+    "package": "npm run build && npm run check"
+  }
+}
