@@ -31,6 +31,9 @@ For local testing, use Shellex `install-app` and choose `package.sapp.json`.
 - Story prompt, generated story bible, generated floors, generated quests, items and enemies.
 - Fixed viewport game surface with intro screen, always-visible run log and animated tiles.
 - Seed-generated adaptive WebAudio music and action sound effects.
+- Save button plus autosave to the appdata folder in the Shellex vault.
+- Pack inventory with usable tonics, equippable gear, XP, levels and hero attributes.
+- Interact action for map landmarks marked with `?`.
 - Lazy content director: story on new run, floor chunks on stairs, beats on request.
 - Browser Qwen adapter is explicit and lazy; it never loads at app boot.
 - Procedural fallback keeps the POC playable when browser model loading is unavailable.

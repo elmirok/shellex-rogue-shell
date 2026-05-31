@@ -4,28 +4,40 @@ const SAVE_PATH = `${DATA_DIR}/save.json`;
 const DEFAULT_PROMPT = "A broken moon has fallen into an encrypted archive. I am a scavenger trying to reach the root directory before rival ghosts rewrite the world.";
 
 const dom = {
+  shell: document.querySelector(".game-shell"),
   setup: document.querySelector("[data-setup]"),
   play: document.querySelector("[data-play]"),
   prompt: document.querySelector("[data-story-prompt]"),
   start: document.querySelector("[data-start]"),
   load: document.querySelector("[data-load]"),
   board: document.querySelector("[data-board]"),
+  boardFrame: document.querySelector(".board-frame"),
   engineStatus: document.querySelector("[data-engine-status]"),
   floorLabel: document.querySelector("[data-floor-label]"),
   placeName: document.querySelector("[data-place-name]"),
   turn: document.querySelector("[data-turn]"),
   hp: document.querySelector("[data-hp]"),
+  level: document.querySelector("[data-level]"),
   xp: document.querySelector("[data-xp]"),
   gold: document.querySelector("[data-gold]"),
+  might: document.querySelector("[data-might]"),
+  guard: document.querySelector("[data-guard]"),
+  focus: document.querySelector("[data-focus]"),
+  attack: document.querySelector("[data-attack]"),
+  equipment: document.querySelector("[data-equipment]"),
   questTitle: document.querySelector("[data-quest-title]"),
   questCopy: document.querySelector("[data-quest-copy]"),
   inventory: document.querySelector("[data-inventory]"),
   log: document.querySelector("[data-log]"),
   provider: document.querySelector("[data-provider]"),
   warmQwen: document.querySelector("[data-warm-qwen]"),
+  directorMode: document.querySelector("[data-director-mode]"),
   modelNote: document.querySelector("[data-model-note]"),
   rest: document.querySelector("[data-rest]"),
+  interact: document.querySelector("[data-interact]"),
   nextBeat: document.querySelector("[data-next-beat]"),
+  save: document.querySelector("[data-save]"),
+  newRun: document.querySelector("[data-new-run]"),
   musicToggle: document.querySelector("[data-music-toggle]"),
   musicStatus: document.querySelector("[data-music-status]"),
   introLine: document.querySelector("[data-intro-line]")
@@ -45,21 +57,19 @@ const api = createShellexApi();
 let qwen = null;
 let director = null;
 let composer = null;
+let boardObserver = null;
 
 function bindUi() {
   dom.start.addEventListener("click", () => startRun());
   dom.load.addEventListener("click", () => loadRun());
   dom.rest.addEventListener("click", () => takeRest());
+  dom.interact.addEventListener("click", () => interact());
   dom.nextBeat.addEventListener("click", () => requestStoryBeat());
+  dom.save.addEventListener("click", () => saveRun(true));
+  dom.newRun.addEventListener("click", () => returnToIntro());
   dom.warmQwen.addEventListener("click", () => warmQwen());
   dom.musicToggle.addEventListener("click", () => toggleMusic());
-  dom.provider.addEventListener("change", () => {
-    if (!state) return;
-    state.settings.provider = dom.provider.value;
-    appendLog(dom.provider.value === "qwen" ? "The director will ask Browser Qwen when it is warm." : "The director returned to the pocket generator.");
-    saveRun();
-    render();
-  });
+  dom.inventory.addEventListener("click", (event) => handleInventoryClick(event));
   document.querySelectorAll("[data-act]").forEach((button) => {
     button.addEventListener("click", () => {
       const direction = button.dataset.act;
@@ -97,7 +107,16 @@ function bindUi() {
       event.preventDefault();
       takeRest();
     }
+    if (key === "e" || key === "enter") {
+      event.preventDefault();
+      interact();
+    }
   });
+  if ("ResizeObserver" in window) {
+    boardObserver = new ResizeObserver(() => fitBoard());
+    boardObserver.observe(dom.boardFrame);
+  }
+  window.addEventListener("resize", () => fitBoard());
 }
 
 async function startRun() {
@@ -116,12 +135,25 @@ async function startRun() {
     player: {
       x: 1,
       y: 1,
+      level: 1,
       hp: 24,
       maxHp: 24,
+      xpNext: 12,
       xp: 0,
-      gold: 0
+      gold: 0,
+      base: {
+        might: 2,
+        guard: 1,
+        focus: 1
+      },
+      equipment: {
+        weapon: null,
+        armor: null,
+        charm: null
+      }
     },
     inventory: [],
+    gameOver: false,
     log: [],
     generated: {
       story: null,
@@ -156,13 +188,7 @@ async function loadRun() {
     const text = await api.fs.readFile(SAVE_PATH);
     const loaded = JSON.parse(text);
     if (loaded?.schema !== "rogue-shell-save-v1") throw new Error("Unknown save format.");
-    state = loaded;
-    state.settings = {
-      provider: "procedural",
-      qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
-      musicEnabled: true,
-      ...(state.settings || {})
-    };
+    state = normalizeRun(loaded);
     state.currentFloor = state.currentFloor || state.generated?.floors?.[String(state.floor)] || null;
     showPlay();
     await startMusic();
@@ -175,11 +201,16 @@ async function loadRun() {
   }
 }
 
-async function saveRun() {
+async function saveRun(announce = false) {
   if (!state) return;
+  if (announce) appendLog("Saved to the Shellex vault.");
   state.updatedAt = new Date().toISOString();
   try {
     await api.fs.writeFile(SAVE_PATH, JSON.stringify(state, null, 2));
+    if (announce) {
+      await api.ui.notify("Rogue Shell saved.");
+      render();
+    }
   } catch (error) {
     setEngine(`Save failed: ${error.message}`);
   }
@@ -188,7 +219,21 @@ async function saveRun() {
 function showPlay() {
   dom.setup.hidden = true;
   dom.play.hidden = false;
+  dom.shell.classList.add("is-playing");
   dom.introLine.textContent = "run mounted";
+  window.requestAnimationFrame(() => fitBoard());
+}
+
+function returnToIntro() {
+  dom.play.hidden = true;
+  dom.setup.hidden = false;
+  dom.shell.classList.remove("is-playing");
+  setEngine("Ready");
+  focusPrompt();
+}
+
+function focusPrompt() {
+  window.setTimeout(() => dom.prompt.focus(), 0);
 }
 
 async function enterFloor(depth) {
@@ -205,7 +250,7 @@ async function enterFloor(depth) {
 }
 
 async function movePlayer(dx, dy) {
-  if (!state || busy) return;
+  if (!canAct()) return;
   const floor = state.currentFloor;
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
@@ -239,7 +284,8 @@ async function movePlayer(dx, dy) {
 
 function attackEnemy(enemy) {
   const rng = rngFor(`combat:${state.seed}:${state.turn}:${enemy.id}`);
-  const damage = 3 + Math.floor(rng() * 5) + Math.floor(state.player.xp / 12);
+  const stats = heroStats();
+  const damage = stats.attack + Math.floor(rng() * 4);
   enemy.hp -= damage;
   markFx("hit", enemy.x, enemy.y);
   composer?.sfx("hit");
@@ -247,16 +293,15 @@ function attackEnemy(enemy) {
   if (enemy.hp <= 0) {
     enemy.dead = true;
     const gold = 2 + Math.floor(rng() * 7) + state.floor;
-    state.player.xp += 4 + state.floor;
     state.player.gold += gold;
+    gainXp(4 + state.floor);
     appendLog(`${enemy.name} collapses into cache dust. +${gold} gold.`);
     if (state.generated.story.quest.target === "defeat" && livingEnemies().length === 0) {
       completeQuest("The floor is clear. The quest thread tightens.");
     }
   } else {
-    const counter = Math.max(1, enemy.atk + Math.floor(rng() * 3) - 1);
-    state.player.hp -= counter;
-    fx.boardHitUntil = Date.now() + 220;
+    const counter = Math.max(1, enemy.atk + Math.floor(rng() * 3) - stats.guard);
+    takeDamage(counter);
     appendLog(`${enemy.name} answers for ${counter}.`);
   }
 }
@@ -264,11 +309,12 @@ function attackEnemy(enemy) {
 function enemyTurn() {
   const floor = state.currentFloor;
   for (const enemy of livingEnemies()) {
+    if (state.player.hp <= 0) break;
     const distance = Math.abs(enemy.x - state.player.x) + Math.abs(enemy.y - state.player.y);
     if (distance === 1) {
-      state.player.hp -= enemy.atk;
-      fx.boardHitUntil = Date.now() + 220;
-      appendLog(`${enemy.name} claws at your prompt for ${enemy.atk}.`);
+      const damage = Math.max(1, enemy.atk - Math.floor(heroStats().guard / 2));
+      takeDamage(damage);
+      appendLog(`${enemy.name} claws at your prompt for ${damage}.`);
       continue;
     }
     const rng = rngFor(`enemy:${state.seed}:${state.turn}:${enemy.id}`);
@@ -298,13 +344,8 @@ function collectItemAt(x, y) {
   const item = state.currentFloor.items.find((candidate) => !candidate.taken && candidate.x === x && candidate.y === y);
   if (!item) return;
   item.taken = true;
-  if (item.kind === "heal") {
-    state.player.hp = Math.min(state.player.maxHp, state.player.hp + item.power);
-    appendLog(`${item.name} restores ${item.power} HP.`);
-  } else {
-    state.inventory.push(item.name);
-    appendLog(`You pocket ${item.name}.`);
-  }
+  state.inventory.push(stripWorldItem(item));
+  appendLog(`Added ${item.name} to your pack.`);
   markFx("pickup", x, y);
   composer?.sfx(item.kind === "heal" ? "heal" : "pickup");
   if (state.generated.story.quest.target === "relic" && item.quest) {
@@ -314,9 +355,48 @@ function collectItemAt(x, y) {
 
 function inspectLandmark(x, y) {
   const landmark = state.currentFloor.landmarks.find((item) => item.x === x && item.y === y);
-  if (!landmark || landmark.seen) return;
+  if (!landmark || landmark.hinted) return;
+  landmark.hinted = true;
+  appendLog(`${landmark.name} hums nearby. Press E or Interact.`);
+}
+
+async function interact() {
+  if (!canAct()) return;
+  const landmark = findReachableLandmark();
+  if (!landmark) {
+    appendLog("There is nothing close enough to interact with.");
+    render();
+    return;
+  }
+  if (landmark.claimed) {
+    appendLog(`${landmark.name} is quiet now.`);
+    render();
+    return;
+  }
   landmark.seen = true;
+  landmark.claimed = true;
   appendLog(`${landmark.name}: ${landmark.text}`);
+  const rng = rngFor(`landmark:${state.seed}:${state.floor}:${landmark.x},${landmark.y}`);
+  const roll = rng();
+  if (roll < 0.34) {
+    const xp = 3 + state.floor;
+    gainXp(xp);
+    appendLog(`You decode it for ${xp} XP.`);
+  } else if (roll < 0.67) {
+    const healed = Math.min(state.player.maxHp - state.player.hp, 5 + state.floor);
+    state.player.hp += healed;
+    appendLog(healed > 0 ? `The mark restores ${healed} HP.` : "The mark steadies you, but you are already whole.");
+  } else {
+    const gift = createLootItem(choice(rng, state.generated.story.items), "charm", rng, state.floor, `l${state.floor}-${state.turn}`);
+    state.inventory.push(gift);
+    appendLog(`${gift.name} appears in your pack.`);
+  }
+  composer?.sfx("beat");
+  state.turn += 1;
+  enemyTurn();
+  checkDefeat();
+  await saveRun();
+  render();
 }
 
 async function maybeUseStairs() {
@@ -328,7 +408,7 @@ async function maybeUseStairs() {
 }
 
 async function takeRest() {
-  if (!state || busy) return;
+  if (!canAct()) return;
   const healed = Math.min(5, state.player.maxHp - state.player.hp);
   if (healed <= 0) {
     appendLog("You are already steady.");
@@ -345,14 +425,15 @@ async function takeRest() {
 }
 
 async function requestStoryBeat() {
-  if (!state || busy) return;
+  if (!canAct()) return;
   await withBusy("Asking director for a beat", async () => {
     const beat = await director.generateBeat(state);
     state.generated.beats.push(beat);
     appendLog(`${beat.title}: ${beat.text}`);
     if (beat.reward && state.inventory.length < 8) {
-      state.inventory.push(beat.reward);
-      appendLog(`${beat.reward} joins your pack.`);
+      const gift = createLootItem(beat.reward, "trinket", rngFor(`beat-item:${state.seed}:${state.turn}:${beat.reward}`), state.floor, `beat-${state.turn}`);
+      state.inventory.push(gift);
+      appendLog(`${gift.name} joins your pack.`);
     }
     composer?.sfx("beat");
   });
@@ -362,14 +443,13 @@ async function requestStoryBeat() {
 
 async function warmQwen() {
   if (!state) return;
-  state.settings.provider = "qwen";
-  dom.provider.value = "qwen";
   await withBusy("Warming Browser Qwen", async () => {
     await qwen.warm((message) => {
       dom.modelNote.textContent = message;
       setEngine(message);
     });
-    appendLog("Browser Qwen is warm. Future uncached chunks will ask it first.");
+    state.settings.provider = "qwen";
+    appendLog("Qwen loaded. New uncached floors and beats will use it when possible.");
   });
   await saveRun();
   render();
@@ -378,7 +458,7 @@ async function warmQwen() {
 function completeQuest(message) {
   if (state.generated.story.quest.done) return;
   state.generated.story.quest.done = true;
-  state.player.xp += 12;
+  gainXp(12);
   state.player.maxHp += 4;
   state.player.hp = Math.min(state.player.maxHp, state.player.hp + 8);
   composer?.sfx("quest");
@@ -387,14 +467,18 @@ function completeQuest(message) {
 
 function checkDefeat() {
   if (state.player.hp > 0) return;
+  if (state.gameOver) return;
   state.player.hp = 0;
+  state.gameOver = true;
   composer?.sfx("down");
-  appendLog("The run falls silent. Start a new story seed to try again.");
+  composer?.stop();
+  appendLog("The run falls silent. Movement is locked. Start a New Run to try again.");
   setEngine("Run ended");
 }
 
 function render() {
   if (!state || !state.currentFloor) return;
+  state = normalizeRun(state);
   const floor = state.currentFloor;
   dom.board.style.setProperty("--cols", String(floor.width));
   dom.board.classList.toggle("board-hit", Date.now() < fx.boardHitUntil);
@@ -414,7 +498,7 @@ function render() {
         kind = "stairs";
       }
       if (landmark) {
-        glyph = "?";
+        glyph = landmark.claimed ? "!" : "?";
         kind = "landmark";
       }
       if (item) {
@@ -444,34 +528,193 @@ function render() {
   }
 
   const story = state.generated.story;
+  const stats = heroStats();
   dom.floorLabel.textContent = `Floor ${state.floor}`;
   dom.placeName.textContent = floor.name;
-  dom.turn.textContent = `Turn ${state.turn}`;
+  dom.turn.textContent = state.gameOver ? "Defeated" : `Turn ${state.turn}`;
   dom.hp.textContent = `${state.player.hp}/${state.player.maxHp}`;
-  dom.xp.textContent = String(state.player.xp);
+  dom.level.textContent = String(state.player.level);
+  dom.xp.textContent = `${state.player.xp}/${state.player.xpNext}`;
   dom.gold.textContent = String(state.player.gold);
+  dom.might.textContent = String(stats.might);
+  dom.guard.textContent = String(stats.guard);
+  dom.focus.textContent = String(stats.focus);
+  dom.attack.textContent = String(stats.attack);
+  dom.equipment.textContent = equipmentSummary();
   dom.questTitle.textContent = story.quest.done ? `${story.quest.title} (done)` : story.quest.title;
   dom.questCopy.textContent = story.quest.description;
-  dom.provider.value = state.settings.provider;
-  dom.inventory.innerHTML = state.inventory.length
-    ? state.inventory.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
-    : "<li>Empty</li>";
+  renderInventory();
   dom.log.innerHTML = state.log.slice(-10).reverse().map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  dom.directorMode.textContent = qwen.ready && state.settings.provider === "qwen" ? "Qwen Director" : "Local Director";
   dom.modelNote.textContent = qwen.ready
-    ? "Browser Qwen is warm."
+    ? "Qwen is loaded for new uncached chunks."
     : state.settings.provider === "qwen"
-      ? "Warm Qwen before uncached generation."
-      : "Pocket generator is active.";
+      ? "Qwen unavailable, using local fallback."
+      : "Stable local generation is active.";
+  setActionDisabled(state.gameOver || busy);
+  dom.play.classList.toggle("game-over", state.gameOver);
   syncMusicButton();
+  fitBoard();
 }
 
 function describeTile(kind, enemy, item, landmark) {
   if (enemy) return `${enemy.name} (${enemy.hp} HP)`;
   if (item) return item.name;
-  if (landmark) return landmark.name;
+  if (landmark) return landmark.claimed ? `${landmark.name} (decoded)` : `${landmark.name} (interact)`;
   if (kind === "stairs") return "Next floor";
   if (kind === "player") return "You";
   return kind;
+}
+
+function canAct() {
+  if (!state || busy) return false;
+  if (state.gameOver || state.player.hp <= 0) {
+    checkDefeat();
+    appendLog("This run is over. Start a New Run to continue.");
+    render();
+    return false;
+  }
+  return true;
+}
+
+function takeDamage(amount) {
+  state.player.hp = Math.max(0, state.player.hp - amount);
+  fx.boardHitUntil = Date.now() + 220;
+}
+
+function gainXp(amount) {
+  if (!amount || amount <= 0) return;
+  state.player.xp += amount;
+  while (state.player.xp >= state.player.xpNext) {
+    state.player.xp -= state.player.xpNext;
+    state.player.level += 1;
+    state.player.xpNext = Math.floor(state.player.xpNext * 1.35 + 6);
+    const growth = ["might", "guard", "focus"][(state.player.level + state.floor) % 3];
+    state.player.base[growth] += 1;
+    state.player.maxHp += 5;
+    state.player.hp = state.player.maxHp;
+    appendLog(`Level ${state.player.level}. ${growthLabel(growth)} improved.`);
+    composer?.sfx("quest");
+  }
+}
+
+function growthLabel(stat) {
+  return stat === "might" ? "Might" : stat === "guard" ? "Guard" : "Focus";
+}
+
+function heroStats() {
+  const base = state?.player?.base || { might: 2, guard: 1, focus: 1 };
+  const stats = { might: base.might, guard: base.guard, focus: base.focus };
+  for (const item of equippedItems()) {
+    for (const [key, value] of Object.entries(item.bonus || {})) {
+      stats[key] = (stats[key] || 0) + value;
+    }
+  }
+  stats.attack = 2 + stats.might + Math.floor(stats.focus / 2);
+  return stats;
+}
+
+function equippedItems() {
+  if (!state?.player?.equipment) return [];
+  return Object.values(state.player.equipment)
+    .map((id) => state.inventory.find((item) => item.id === id))
+    .filter(Boolean);
+}
+
+function equipmentSummary() {
+  const items = equippedItems();
+  return items.length ? items.map((item) => `${item.slot}: ${item.name}`).join(" | ") : "Nothing equipped.";
+}
+
+function renderInventory() {
+  if (!state.inventory.length) {
+    dom.inventory.innerHTML = `<p class="empty-pack">Empty</p>`;
+    return;
+  }
+  dom.inventory.innerHTML = state.inventory.map((item) => {
+    const equipped = isEquipped(item);
+    const bonus = Object.entries(item.bonus || {}).map(([key, value]) => `+${value} ${growthLabel(key)}`).join(", ");
+    const action = item.kind === "heal"
+      ? `<button type="button" data-inventory-action="use" data-item-id="${escapeHtml(item.id)}">Use</button>`
+      : item.slot
+        ? `<button type="button" data-inventory-action="equip" data-item-id="${escapeHtml(item.id)}">${equipped ? "Unequip" : "Equip"}</button>`
+        : "";
+    return [
+      `<article class="inventory-item ${equipped ? "equipped" : ""}">`,
+      `<div><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(itemLabel(item))}${bonus ? ` | ${escapeHtml(bonus)}` : ""}</span></div>`,
+      action,
+      `</article>`
+    ].join("");
+  }).join("");
+}
+
+function itemLabel(item) {
+  if (item.kind === "heal") return `tonic, restores ${item.power} HP`;
+  if (item.slot) return `${item.slot} gear`;
+  return item.kind || "relic";
+}
+
+function handleInventoryClick(event) {
+  if (!(event.target instanceof Element)) return;
+  const button = event.target.closest("[data-inventory-action]");
+  if (!button || !state) return;
+  const item = state.inventory.find((candidate) => candidate.id === button.dataset.itemId);
+  if (!item) return;
+  if (button.dataset.inventoryAction === "use") useItem(item);
+  if (button.dataset.inventoryAction === "equip") toggleEquip(item);
+  saveRun();
+  render();
+}
+
+function useItem(item) {
+  if (item.kind !== "heal") return;
+  const healed = Math.min(state.player.maxHp - state.player.hp, item.power);
+  state.player.hp += healed;
+  state.inventory = state.inventory.filter((candidate) => candidate.id !== item.id);
+  appendLog(healed > 0 ? `${item.name} restores ${healed} HP.` : `${item.name} was used, but you were already whole.`);
+  composer?.sfx("heal");
+}
+
+function toggleEquip(item) {
+  if (!item.slot) return;
+  if (state.player.equipment[item.slot] === item.id) {
+    state.player.equipment[item.slot] = null;
+    appendLog(`Unequipped ${item.name}.`);
+    return;
+  }
+  state.player.equipment[item.slot] = item.id;
+  appendLog(`Equipped ${item.name}.`);
+  composer?.sfx("pickup");
+}
+
+function isEquipped(item) {
+  return Boolean(item.slot && state.player.equipment[item.slot] === item.id);
+}
+
+function setActionDisabled(disabled) {
+  document.querySelectorAll("[data-act], [data-rest], [data-next-beat], [data-interact]").forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
+function fitBoard() {
+  if (!state?.currentFloor || !dom.boardFrame) return;
+  const frame = dom.boardFrame.getBoundingClientRect();
+  const width = Math.max(180, frame.width - 16);
+  const height = Math.max(120, frame.height - 16);
+  const ratio = state.currentFloor.width / state.currentFloor.height;
+  const fittedWidth = Math.min(width, height * ratio);
+  const fittedHeight = fittedWidth / ratio;
+  dom.board.style.width = `${Math.floor(fittedWidth)}px`;
+  dom.board.style.height = `${Math.floor(fittedHeight)}px`;
+}
+
+function findReachableLandmark() {
+  const floor = state.currentFloor;
+  return floor.landmarks.find((landmark) => {
+    const distance = Math.abs(landmark.x - state.player.x) + Math.abs(landmark.y - state.player.y);
+    return distance <= 1;
+  });
 }
 
 function appendLog(line) {
@@ -542,7 +785,7 @@ async function withBusy(label, task) {
     await api.ui.notify(`Rogue Shell: ${error.message}`);
   } finally {
     busy = false;
-    setEngine("Ready");
+    setEngine(state?.gameOver ? "Run ended" : "Ready");
   }
 }
 
@@ -743,7 +986,7 @@ class ContentDirector {
         "Keys: title, text, reward.",
         `Story: ${JSON.stringify(run.generated.story)}`,
         `Floor: ${run.floor}`,
-        `Inventory: ${run.inventory.join(", ") || "empty"}`
+        `Inventory: ${run.inventory.map((item) => item.name).join(", ") || "empty"}`
       ].join("\n")
     });
     return normalizeBeat(beat, fallback());
@@ -881,11 +1124,11 @@ function createProceduralFloor(run, depth, flavor) {
   for (let index = 0; index < itemCount; index += 1) {
     const spot = placeInRoom(rng, rooms, occupied);
     const quest = depth === 2 && index === 0 && story.quest.target === "relic";
+    const name = quest ? story.items[0] : choice(rng, itemNames);
+    const loot = createLootItem(name, quest ? "charm" : "trinket", rng, depth, `${depth}-${index}`);
     items.push({
-      id: `i${depth}-${index}`,
-      name: quest ? story.items[0] : choice(rng, itemNames),
-      kind: rng() > 0.62 && !quest ? "heal" : "trinket",
-      power: 5 + Math.floor(rng() * 7),
+      ...loot,
+      id: `i${depth}-${index}-${loot.id}`,
       quest,
       x: spot.x,
       y: spot.y
@@ -1067,6 +1310,121 @@ function placeInRoom(rng, rooms, occupied) {
 
 function coordKey(x, y) {
   return `${x},${y}`;
+}
+
+function normalizeRun(run) {
+  const normalized = run || {};
+  normalized.settings = {
+    provider: "procedural",
+    qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
+    musicEnabled: true,
+    ...(normalized.settings || {})
+  };
+  normalized.player = {
+    x: 1,
+    y: 1,
+    level: 1,
+    hp: 24,
+    maxHp: 24,
+    xp: 0,
+    xpNext: 12,
+    gold: 0,
+    base: { might: 2, guard: 1, focus: 1 },
+    equipment: { weapon: null, armor: null, charm: null },
+    ...(normalized.player || {})
+  };
+  normalized.player.base = {
+    might: 2,
+    guard: 1,
+    focus: 1,
+    ...(normalized.player.base || {})
+  };
+  normalized.player.equipment = {
+    weapon: null,
+    armor: null,
+    charm: null,
+    ...(normalized.player.equipment || {})
+  };
+  normalized.inventory = (normalized.inventory || []).map((item, index) => {
+    if (typeof item === "string") {
+      return createLootItem(item, "trinket", rngFor(`migrate:${item}:${index}`), normalized.floor || 1, `old-${index}`);
+    }
+    return {
+      id: item.id || `item-${index}-${hashString(item.name || "item")}`,
+      name: safeText(item.name) || "unknown item",
+      kind: item.kind || "trinket",
+      slot: item.slot || null,
+      power: item.power || 0,
+      bonus: item.bonus || {},
+      quest: Boolean(item.quest)
+    };
+  });
+  for (const [slot, id] of Object.entries(normalized.player.equipment)) {
+    if (id && !normalized.inventory.some((item) => item.id === id && item.slot === slot)) normalized.player.equipment[slot] = null;
+  }
+  normalized.generated = normalized.generated || { story: null, floors: {}, beats: [] };
+  normalized.generated.floors = normalized.generated.floors || {};
+  for (const [key, floor] of Object.entries(normalized.generated.floors)) {
+    normalized.generated.floors[key] = normalizeFloor(floor, Number(key) || normalized.floor || 1);
+  }
+  if (normalized.currentFloor) normalized.currentFloor = normalizeFloor(normalized.currentFloor, normalized.floor || 1);
+  normalized.generated.beats = normalized.generated.beats || [];
+  normalized.log = normalized.log || [];
+  normalized.gameOver = Boolean(normalized.gameOver || normalized.player.hp <= 0);
+  return normalized;
+}
+
+function normalizeFloor(floor, depth) {
+  if (!floor) return floor;
+  const rng = rngFor(`floor-normalize:${depth}`);
+  floor.items = (floor.items || []).map((item, index) => {
+    if (item.slot || item.kind === "heal" || item.bonus) return item;
+    const loot = createLootItem(item.name || "cache token", item.kind || "trinket", rng, depth, `${depth}-old-${index}`);
+    return { ...item, ...loot, id: item.id || loot.id };
+  });
+  floor.landmarks = (floor.landmarks || []).map((landmark) => ({
+    ...landmark,
+    hinted: Boolean(landmark.hinted || landmark.seen),
+    claimed: Boolean(landmark.claimed)
+  }));
+  return floor;
+}
+
+function createLootItem(name, preferredKind, rng, depth, suffix) {
+  const kind = preferredKind === "trinket" ? choice(rng, ["weapon", "armor", "charm", "heal"]) : preferredKind;
+  if (kind === "heal") {
+    return {
+      id: `heal-${suffix}-${hashString(name)}`,
+      name: `${sentenceCase(name)} Tonic`,
+      kind: "heal",
+      slot: null,
+      power: 6 + depth * 2 + Math.floor(rng() * 6),
+      bonus: {}
+    };
+  }
+  const slot = kind === "weapon" ? "weapon" : kind === "armor" ? "armor" : "charm";
+  const stat = slot === "weapon" ? "might" : slot === "armor" ? "guard" : "focus";
+  const bonus = { [stat]: 1 + Math.floor(depth / 3) + Math.floor(rng() * 2) };
+  return {
+    id: `${slot}-${suffix}-${hashString(name)}`,
+    name: sentenceCase(name),
+    kind,
+    slot,
+    power: 0,
+    bonus
+  };
+}
+
+function stripWorldItem(item) {
+  return {
+    id: item.id,
+    name: item.name,
+    kind: item.kind,
+    slot: item.slot || null,
+    power: item.power || 0,
+    bonus: item.bonus || {},
+    quest: Boolean(item.quest)
+  };
 }
 
 function normalizeStory(candidate, fallback) {

@@ -140,6 +140,7 @@ Current POC modules live in `src/app.js`:
 - Procedural director functions: deterministic fallback content.
 - Dungeon engine: local map, turn, combat, item, quest and stair logic.
 - `AdaptiveComposer`: seed-driven WebAudio score and short action sounds.
+- Inventory model: consumables, equipment slots, stat bonuses, XP thresholds and level-up growth.
 - Vault persistence: Shellex SDK save/load wrapper.
 
 Future split:

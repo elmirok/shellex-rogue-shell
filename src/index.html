@@ -8,6 +8,7 @@
       </div>
       <div class="hud-readout">
         <div class="hud-stat"><span>HP</span><strong data-hp>0/0</strong></div>
+        <div class="hud-stat"><span>LVL</span><strong data-level>1</strong></div>
         <div class="hud-stat"><span>XP</span><strong data-xp>0</strong></div>
         <div class="hud-stat"><span>Gold</span><strong data-gold>0</strong></div>
         <div class="engine-pill" data-engine-status>Engine idle</div>
@@ -56,12 +57,26 @@
           <button type="button" data-act="left" aria-label="Move left">&lt;</button>
           <button type="button" data-act="down" aria-label="Move down">v</button>
           <button type="button" data-act="right" aria-label="Move right">&gt;</button>
+          <button type="button" data-interact>Interact</button>
           <button type="button" data-rest>Rest</button>
           <button type="button" data-next-beat>New Beat</button>
+          <button type="button" data-save>Save</button>
+          <button type="button" data-new-run>New Run</button>
         </div>
       </section>
 
       <aside class="side-panel" aria-label="Run details">
+        <section class="panel-section hero-section">
+          <p class="eyebrow">Hero</p>
+          <div class="hero-grid">
+            <span>Might <strong data-might>0</strong></span>
+            <span>Guard <strong data-guard>0</strong></span>
+            <span>Focus <strong data-focus>0</strong></span>
+            <span>Atk <strong data-attack>0</strong></span>
+          </div>
+          <p class="tiny" data-equipment>Nothing equipped.</p>
+        </section>
+
         <section class="panel-section quest-section">
           <p class="eyebrow">Quest</p>
           <h3 data-quest-title>No quest</h3>
@@ -70,22 +85,16 @@
 
         <section class="panel-section pack-section">
           <p class="eyebrow">Pack</p>
-          <ul class="inventory" data-inventory></ul>
+          <div class="inventory" data-inventory></div>
         </section>
 
         <section class="panel-section director-section">
           <p class="eyebrow">Director</p>
           <div class="director-grid">
-            <label>
-              <span>Provider</span>
-              <select data-provider>
-                <option value="procedural">Pocket Qwen</option>
-                <option value="qwen">Browser Qwen</option>
-              </select>
-            </label>
-            <button type="button" data-warm-qwen>Warm Qwen</button>
+            <strong data-director-mode>Local Director</strong>
+            <button type="button" data-warm-qwen>Load Qwen</button>
           </div>
-          <p class="tiny" data-model-note>Model stays asleep until explicitly warmed.</p>
+          <p class="tiny" data-model-note>Generates cached story chunks only between actions.</p>
         </section>
       </aside>
 
