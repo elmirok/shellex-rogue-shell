@@ -31,6 +31,7 @@ For local testing, use Shellex `install-app` and choose `package.sapp.json`.
 - Story prompt, generated story bible, generated floors, generated quests, items and enemies.
 - Fixed viewport game surface with intro screen, always-visible run log and animated tiles.
 - Seed-generated adaptive WebAudio music and action sound effects.
+- Audio pauses or disposes when the app is hidden, closed or returned to setup.
 - Save button plus autosave to the appdata folder in the Shellex vault.
 - Pack inventory with usable tonics, equippable gear, XP, levels and hero attributes.
 - Interact action for map landmarks marked with `?`.

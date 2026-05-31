@@ -131,6 +131,12 @@ function bindUi() {
     boardObserver.observe(dom.boardFrame);
   }
   window.addEventListener("resize", () => fitBoard());
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopMusicForLifecycle("score paused");
+  });
+  window.addEventListener("pagehide", disposeMusicForLifecycle);
+  window.addEventListener("beforeunload", disposeMusicForLifecycle);
+  window.addEventListener("freeze", () => stopMusicForLifecycle("score paused"));
   syncSetupDirector();
   syncPanelTabs();
 }
@@ -248,6 +254,7 @@ function showPlay() {
 }
 
 function returnToIntro() {
+  stopMusicForLifecycle("score muted");
   dom.play.hidden = true;
   dom.setup.hidden = false;
   dom.app.classList.remove("is-playing");
@@ -831,9 +838,13 @@ async function toggleMusic() {
     if (enabled) composer.stop();
     return;
   }
-  state.settings.musicEnabled = !state.settings.musicEnabled;
-  if (state.settings.musicEnabled) await startMusic();
-  else composer?.stop();
+  if (!composer?.playing) {
+    state.settings.musicEnabled = true;
+    await startMusic();
+  } else {
+    state.settings.musicEnabled = false;
+    composer.stop();
+  }
   await saveRun();
   syncMusicButton();
 }
@@ -852,6 +863,16 @@ async function startMusic() {
     state.settings.musicEnabled = false;
     syncMusicButton();
   }
+}
+
+function stopMusicForLifecycle(status = "score muted") {
+  composer?.stop({ suspend: true, status });
+  if (dom.musicStatus) dom.musicStatus.textContent = status;
+}
+
+function disposeMusicForLifecycle() {
+  composer?.dispose();
+  composer = null;
 }
 
 function syncMusicButton() {
@@ -920,7 +941,7 @@ class AdaptiveComposer {
   async start(run) {
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtor) throw new Error("WebAudio is unavailable.");
-    if (!this.context) {
+    if (!this.context || this.context.state === "closed") {
       this.context = new AudioCtor();
       this.master = this.context.createGain();
       this.master.gain.value = 0.0001;
@@ -960,14 +981,30 @@ class AdaptiveComposer {
     this.timer = window.setInterval(() => this.tick(), beatMs);
   }
 
-  stop() {
+  stop(options = {}) {
+    const { suspend = false, status = "score muted" } = options;
     if (this.timer) window.clearInterval(this.timer);
     this.timer = null;
     this.playing = false;
-    if (this.master && this.context) {
-      this.master.gain.setTargetAtTime(0.0001, this.context.currentTime, 0.14);
+    if (this.master && this.context && this.context.state !== "closed") {
+      const now = this.context.currentTime;
+      this.master.gain.cancelScheduledValues(now);
+      this.master.gain.setTargetAtTime(0.0001, now, 0.06);
+      if (suspend && this.context.state === "running") {
+        this.context.suspend().catch(() => {});
+      }
     }
-    dom.musicStatus.textContent = "score muted";
+    dom.musicStatus.textContent = status;
+  }
+
+  dispose() {
+    this.stop({ status: "score muted" });
+    const context = this.context;
+    this.context = null;
+    this.master = null;
+    if (context && context.state !== "closed") {
+      context.close().catch(() => {});
+    }
   }
 
   tick() {
