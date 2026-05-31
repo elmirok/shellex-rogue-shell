@@ -57,6 +57,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 button:hover,
 button:focus-visible,
 select:focus-visible,
@@ -121,6 +126,10 @@ h3 {
     #090d0f;
 }
 
+.rogue-shell.is-playing {
+  padding: 8px;
+}
+
 .game-shell {
   width: 100%;
   height: 100%;
@@ -129,6 +138,11 @@ h3 {
   grid-template-rows: auto 1fr;
   gap: 10px;
   min-height: 0;
+}
+
+.game-shell.is-playing {
+  grid-template-rows: 38px minmax(0, 1fr);
+  gap: 6px;
 }
 
 .game-hud {
@@ -145,20 +159,61 @@ h3 {
 }
 
 .game-shell.is-playing .game-hud {
-  min-height: 54px;
-  padding: 7px 10px;
-}
-
-.game-shell.is-playing h1 {
-  font-size: clamp(24px, 3vw, 34px);
+  min-height: 0;
+  grid-template-columns: minmax(150px, auto) 1fr;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 4px 7px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.36);
 }
 
 .game-shell.is-playing .eyebrow {
   font-size: 10px;
 }
 
+.game-shell.is-playing .brand-block .eyebrow {
+  display: none;
+}
+
 .brand-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
+}
+
+.brand-block strong {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.game-shell.is-playing .brand-block {
+  gap: 8px;
+}
+
+.game-shell.is-playing .brand-block strong {
+  font-size: 13px;
+}
+
+.game-mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(133, 232, 157, 0.38);
+  border-radius: 6px;
+  background: rgba(133, 232, 157, 0.13);
+  color: var(--green);
+  font: 800 20px/1 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
+.game-shell.is-playing .game-mark {
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
 }
 
 .hud-readout {
@@ -169,6 +224,10 @@ h3 {
   min-width: 0;
 }
 
+.game-shell.is-playing .hud-readout {
+  gap: 5px;
+}
+
 .hud-stat,
 .engine-pill,
 .turn-chip {
@@ -176,6 +235,19 @@ h3 {
   background: #0f1518;
   border-radius: 6px;
   padding: 7px 9px;
+}
+
+.game-shell.is-playing .hud-stat,
+.game-shell.is-playing .engine-pill {
+  min-height: 28px;
+  padding: 3px 6px;
+}
+
+.game-shell.is-playing .hud-stat {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .hud-stat {
@@ -189,6 +261,11 @@ h3 {
   text-transform: uppercase;
 }
 
+.game-shell.is-playing .hud-stat span {
+  display: inline;
+  font-size: 9px;
+}
+
 .hud-stat strong {
   display: block;
   margin-top: 2px;
@@ -197,10 +274,23 @@ h3 {
   line-height: 1;
 }
 
+.game-shell.is-playing .hud-stat strong {
+  display: inline;
+  margin: 0;
+  font-size: 14px;
+}
+
 .engine-pill,
 .turn-chip {
   color: var(--cyan);
   white-space: nowrap;
+}
+
+.game-shell.is-playing .engine-pill,
+.game-shell.is-playing [data-music-toggle] {
+  min-height: 28px;
+  padding: 0 7px;
+  font-size: 12px;
 }
 
 .intro-screen {
@@ -247,6 +337,44 @@ textarea {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.setup-card {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid rgba(116, 210, 255, 0.18);
+  padding-top: 12px;
+}
+
+.setup-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.setup-card-head strong {
+  color: var(--cyan);
+  font-size: 15px;
+}
+
+.choice-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.choice-row button,
+.panel-tabs button {
+  min-width: 0;
+  border-color: rgba(116, 210, 255, 0.18);
+}
+
+.choice-row button.is-selected,
+.panel-tabs button.is-selected {
+  border-color: rgba(133, 232, 157, 0.62);
+  background: #1d4431;
+  color: #ecfff2;
 }
 
 .intro-art {
@@ -355,21 +483,21 @@ textarea {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(360px, 1fr) minmax(220px, 330px);
-  grid-template-rows: minmax(0, 1fr) minmax(96px, 16vh);
-  gap: 8px;
+  grid-template-rows: minmax(0, 1fr) 78px;
+  gap: 6px;
 }
 
 .board-shell,
 .side-panel,
 .log-dock {
   min-height: 0;
-  padding: 8px;
+  padding: 6px;
 }
 
 .board-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
 }
 
@@ -382,7 +510,7 @@ textarea {
 
 .board-header h2 {
   max-width: none;
-  font-size: clamp(18px, 2.2vw, 26px);
+  font-size: clamp(17px, 1.9vw, 24px);
   line-height: 1.05;
 }
 
@@ -411,11 +539,11 @@ textarea {
   --cols: 23;
   display: grid;
   grid-template-columns: repeat(var(--cols), minmax(14px, 1fr));
-  gap: 3px;
+  gap: 2px;
   width: 100%;
   max-width: 100%;
   aspect-ratio: 23 / 15;
-  padding: 6px;
+  padding: 4px;
   overflow: hidden;
 }
 
@@ -514,16 +642,33 @@ textarea {
 
 .action-row button {
   min-width: 34px;
-  min-height: 30px;
-  font-size: 14px;
+  min-height: 28px;
+  font-size: 13px;
 }
 
 .side-panel {
   display: grid;
-  grid-template-rows: auto minmax(82px, 0.9fr) minmax(108px, 1.2fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
   min-width: 0;
   overflow: hidden;
+}
+
+.panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.panel-tabs button {
+  min-height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+
+.panel-pages {
+  min-height: 0;
+  display: grid;
 }
 
 .panel-section {
@@ -536,6 +681,14 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 7px;
+}
+
+.panel-page {
+  display: none;
+}
+
+.panel-page.is-active {
+  display: flex;
 }
 
 .hero-grid {
@@ -638,7 +791,7 @@ select {
   grid-column: 1 / -1;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 6px;
+  gap: 4px;
   background: rgba(7, 11, 13, 0.96);
 }
 
@@ -671,10 +824,10 @@ select {
 .log li {
   min-width: 0;
   margin: 0;
-  padding: 3px 0;
+  padding: 2px 0;
   color: #d8e1df;
   line-height: 1.22;
-  font-size: clamp(11px, 1.25vw, 13px);
+  font-size: clamp(11px, 1.1vw, 12px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -840,8 +993,7 @@ select {
   }
 
   .side-panel {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-rows: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .director-grid {
@@ -855,8 +1007,8 @@ select {
     padding: 8px;
   }
 
-  .brand-block h1 {
-    font-size: 24px;
+  .brand-block strong {
+    font-size: 13px;
   }
 
   .hud-readout {
@@ -921,8 +1073,7 @@ select {
   }
 
   .side-panel {
-    grid-template-columns: 1.35fr 0.8fr 1fr;
-    grid-template-rows: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
     gap: 6px;
   }
 
@@ -933,7 +1084,6 @@ select {
 
   .quest-section p:last-child,
   .director-section .tiny,
-  .director-grid button,
   label span {
     display: none;
   }

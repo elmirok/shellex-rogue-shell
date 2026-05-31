@@ -3,8 +3,11 @@
   <section class="game-shell" aria-label="Rogue Shell game">
     <header class="game-hud">
       <div class="brand-block">
-        <p class="eyebrow">Shellex Vault Game</p>
-        <h1>Rogue Shell</h1>
+        <div class="game-mark" aria-hidden="true">@</div>
+        <div>
+          <p class="eyebrow">Shellex Vault Game</p>
+          <strong data-header-mode>Story Director Ready</strong>
+        </div>
       </div>
       <div class="hud-readout">
         <div class="hud-stat"><span>HP</span><strong data-hp>0/0</strong></div>
@@ -21,6 +24,20 @@
         <p class="eyebrow">Story Seed</p>
         <h2>Open a vault below the command line.</h2>
         <textarea data-story-prompt spellcheck="true">A broken moon has fallen into an encrypted archive. I am a scavenger trying to reach the root directory before rival ghosts rewrite the world.</textarea>
+        <div class="setup-card">
+          <div class="setup-card-head">
+            <div>
+              <p class="eyebrow">Director</p>
+              <strong data-setup-director>Local Director</strong>
+            </div>
+            <button type="button" data-prepare-qwen>Prepare Qwen</button>
+          </div>
+          <div class="choice-row" role="radiogroup" aria-label="Director mode">
+            <button type="button" class="is-selected" aria-pressed="true" data-provider-choice="procedural">Local</button>
+            <button type="button" aria-pressed="false" data-provider-choice="qwen">Qwen</button>
+          </div>
+          <p class="tiny" data-setup-model-note>Local director ready.</p>
+        </div>
         <div class="setup-actions">
           <button type="button" class="primary" data-start>Start Run</button>
           <button type="button" data-load>Load Vault Save</button>
@@ -66,36 +83,44 @@
       </section>
 
       <aside class="side-panel" aria-label="Run details">
-        <section class="panel-section hero-section">
-          <p class="eyebrow">Hero</p>
-          <div class="hero-grid">
-            <span>Might <strong data-might>0</strong></span>
-            <span>Guard <strong data-guard>0</strong></span>
-            <span>Focus <strong data-focus>0</strong></span>
-            <span>Atk <strong data-attack>0</strong></span>
-          </div>
-          <p class="tiny" data-equipment>Nothing equipped.</p>
-        </section>
+        <nav class="panel-tabs" aria-label="Run menu">
+          <button type="button" class="is-selected" aria-pressed="true" data-panel-tab="hero">Hero</button>
+          <button type="button" aria-pressed="false" data-panel-tab="quest">Quest</button>
+          <button type="button" aria-pressed="false" data-panel-tab="pack">Pack</button>
+          <button type="button" aria-pressed="false" data-panel-tab="director">Director</button>
+        </nav>
 
-        <section class="panel-section quest-section">
-          <p class="eyebrow">Quest</p>
-          <h3 data-quest-title>No quest</h3>
-          <p data-quest-copy></p>
-        </section>
+        <div class="panel-pages">
+          <section class="panel-section panel-page hero-section is-active" data-panel-page="hero">
+            <p class="eyebrow">Hero</p>
+            <div class="hero-grid">
+              <span>Might <strong data-might>0</strong></span>
+              <span>Guard <strong data-guard>0</strong></span>
+              <span>Focus <strong data-focus>0</strong></span>
+              <span>Atk <strong data-attack>0</strong></span>
+            </div>
+            <p class="tiny" data-equipment>Nothing equipped.</p>
+          </section>
 
-        <section class="panel-section pack-section">
-          <p class="eyebrow">Pack</p>
-          <div class="inventory" data-inventory></div>
-        </section>
+          <section class="panel-section panel-page quest-section" data-panel-page="quest">
+            <p class="eyebrow">Quest</p>
+            <h3 data-quest-title>No quest</h3>
+            <p data-quest-copy></p>
+          </section>
 
-        <section class="panel-section director-section">
-          <p class="eyebrow">Director</p>
-          <div class="director-grid">
-            <strong data-director-mode>Local Director</strong>
-            <button type="button" data-warm-qwen>Load Qwen</button>
-          </div>
-          <p class="tiny" data-model-note>Generates cached story chunks only between actions.</p>
-        </section>
+          <section class="panel-section panel-page pack-section" data-panel-page="pack">
+            <p class="eyebrow">Pack</p>
+            <div class="inventory" data-inventory></div>
+          </section>
+
+          <section class="panel-section panel-page director-section" data-panel-page="director">
+            <p class="eyebrow">Director</p>
+            <div class="director-grid">
+              <strong data-director-mode>Local Director</strong>
+            </div>
+            <p class="tiny" data-model-note>Stable local generation is active.</p>
+          </section>
+        </div>
       </aside>
 
       <section class="log-dock" aria-label="Run log">

@@ -34,6 +34,8 @@ For local testing, use Shellex `install-app` and choose `package.sapp.json`.
 - Save button plus autosave to the appdata folder in the Shellex vault.
 - Pack inventory with usable tonics, equippable gear, XP, levels and hero attributes.
 - Interact action for map landmarks marked with `?`.
+- Intro-screen director setup for local generation or browser Qwen before a run starts.
+- Tabbed in-run menu for hero stats, quest, pack and director status.
 - Lazy content director: story on new run, floor chunks on stairs, beats on request.
 - Browser Qwen adapter is explicit and lazy; it never loads at app boot.
 - Procedural fallback keeps the POC playable when browser model loading is unavailable.
@@ -48,6 +50,6 @@ This writes and validates `package.sapp.json`.
 
 ## Browser Model Note
 
-The intended local model path is Qwen 0.5B in the browser. For the POC, Browser Qwen is behind the **Warm Qwen** action and uses Transformers.js with `Mozilla/Qwen2.5-0.5B-Instruct` when WebGPU is available. If it cannot load, Rogue Shell falls back to the compact pocket generator and keeps running.
+The intended local model path is Qwen 0.5B in the browser. For the POC, Browser Qwen is prepared from the intro screen before a run starts and uses Transformers.js with `Mozilla/Qwen2.5-0.5B-Instruct` when WebGPU is available. If it cannot load, Rogue Shell falls back to the compact pocket generator and keeps running.
 
 See [docs/architecture.md](docs/architecture.md) for the full content-generation plan.

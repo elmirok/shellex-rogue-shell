@@ -4,12 +4,18 @@ const SAVE_PATH = `${DATA_DIR}/save.json`;
 const DEFAULT_PROMPT = "A broken moon has fallen into an encrypted archive. I am a scavenger trying to reach the root directory before rival ghosts rewrite the world.";
 
 const dom = {
+  app: document.querySelector("[data-app]"),
   shell: document.querySelector(".game-shell"),
+  headerMode: document.querySelector("[data-header-mode]"),
   setup: document.querySelector("[data-setup]"),
   play: document.querySelector("[data-play]"),
   prompt: document.querySelector("[data-story-prompt]"),
   start: document.querySelector("[data-start]"),
   load: document.querySelector("[data-load]"),
+  setupDirector: document.querySelector("[data-setup-director]"),
+  setupModelNote: document.querySelector("[data-setup-model-note]"),
+  prepareQwen: document.querySelector("[data-prepare-qwen]"),
+  providerChoices: Array.from(document.querySelectorAll("[data-provider-choice]")),
   board: document.querySelector("[data-board]"),
   boardFrame: document.querySelector(".board-frame"),
   engineStatus: document.querySelector("[data-engine-status]"),
@@ -29,10 +35,10 @@ const dom = {
   questCopy: document.querySelector("[data-quest-copy]"),
   inventory: document.querySelector("[data-inventory]"),
   log: document.querySelector("[data-log]"),
-  provider: document.querySelector("[data-provider]"),
-  warmQwen: document.querySelector("[data-warm-qwen]"),
   directorMode: document.querySelector("[data-director-mode]"),
   modelNote: document.querySelector("[data-model-note]"),
+  panelTabs: Array.from(document.querySelectorAll("[data-panel-tab]")),
+  panelPages: Array.from(document.querySelectorAll("[data-panel-page]")),
   rest: document.querySelector("[data-rest]"),
   interact: document.querySelector("[data-interact]"),
   nextBeat: document.querySelector("[data-next-beat]"),
@@ -58,6 +64,8 @@ let qwen = null;
 let director = null;
 let composer = null;
 let boardObserver = null;
+let setupSettings = { provider: "procedural" };
+let activePanel = "hero";
 
 function bindUi() {
   dom.start.addEventListener("click", () => startRun());
@@ -67,9 +75,15 @@ function bindUi() {
   dom.nextBeat.addEventListener("click", () => requestStoryBeat());
   dom.save.addEventListener("click", () => saveRun(true));
   dom.newRun.addEventListener("click", () => returnToIntro());
-  dom.warmQwen.addEventListener("click", () => warmQwen());
+  dom.prepareQwen.addEventListener("click", () => prepareQwen());
   dom.musicToggle.addEventListener("click", () => toggleMusic());
   dom.inventory.addEventListener("click", (event) => handleInventoryClick(event));
+  dom.providerChoices.forEach((button) => {
+    button.addEventListener("click", () => setProviderChoice(button.dataset.providerChoice));
+  });
+  dom.panelTabs.forEach((button) => {
+    button.addEventListener("click", () => setActivePanel(button.dataset.panelTab));
+  });
   document.querySelectorAll("[data-act]").forEach((button) => {
     button.addEventListener("click", () => {
       const direction = button.dataset.act;
@@ -117,10 +131,17 @@ function bindUi() {
     boardObserver.observe(dom.boardFrame);
   }
   window.addEventListener("resize", () => fitBoard());
+  syncSetupDirector();
+  syncPanelTabs();
 }
 
 async function startRun() {
   if (busy) return;
+  const requestedProvider = setupSettings.provider;
+  if (requestedProvider === "qwen" && !qwen.ready) {
+    await prepareQwen();
+  }
+  const activeProvider = requestedProvider === "qwen" && qwen.ready ? "qwen" : "procedural";
   const storyPrompt = (dom.prompt.value || DEFAULT_PROMPT).trim().slice(0, 1200);
   const seed = hashString(`${storyPrompt}:${Date.now()}`);
   state = {
@@ -161,8 +182,8 @@ async function startRun() {
       beats: []
     },
     settings: {
-      provider: "procedural",
-      qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
+      provider: activeProvider,
+      qwenModel: qwen.model,
       musicEnabled: dom.musicToggle.dataset.enabled !== "false"
     },
     currentFloor: null
@@ -219,7 +240,9 @@ async function saveRun(announce = false) {
 function showPlay() {
   dom.setup.hidden = true;
   dom.play.hidden = false;
+  dom.app.classList.add("is-playing");
   dom.shell.classList.add("is-playing");
+  dom.headerMode.textContent = "Run in progress";
   dom.introLine.textContent = "run mounted";
   window.requestAnimationFrame(() => fitBoard());
 }
@@ -227,8 +250,11 @@ function showPlay() {
 function returnToIntro() {
   dom.play.hidden = true;
   dom.setup.hidden = false;
+  dom.app.classList.remove("is-playing");
   dom.shell.classList.remove("is-playing");
+  dom.headerMode.textContent = "Story Director Ready";
   setEngine("Ready");
+  syncSetupDirector();
   focusPrompt();
 }
 
@@ -441,18 +467,82 @@ async function requestStoryBeat() {
   render();
 }
 
-async function warmQwen() {
-  if (!state) return;
-  await withBusy("Warming Browser Qwen", async () => {
+async function prepareQwen() {
+  if (busy || qwen.ready) return qwen.ready;
+  const previousProvider = setupSettings.provider;
+  busy = true;
+  setupSettings.provider = "qwen";
+  syncSetupDirector("Preparing Qwen...");
+  setEngine("Preparing Qwen");
+  try {
     await qwen.warm((message) => {
-      dom.modelNote.textContent = message;
+      dom.setupModelNote.textContent = message;
       setEngine(message);
     });
-    state.settings.provider = "qwen";
-    appendLog("Qwen loaded. New uncached floors and beats will use it when possible.");
+    setupSettings.provider = "qwen";
+    dom.setupModelNote.textContent = "Qwen ready.";
+    setEngine("Qwen ready");
+    return true;
+  } catch (error) {
+    setupSettings.provider = previousProvider === "qwen" ? "procedural" : previousProvider;
+    dom.setupModelNote.textContent = "Qwen unavailable in this browser frame. Local director ready.";
+    setEngine("Local fallback");
+    await api.ui.notify(`Rogue Shell: ${error.message}. Using local director.`);
+    return false;
+  } finally {
+    busy = false;
+    syncSetupDirector();
+    if (!state) setEngine(qwen.ready ? "Qwen ready" : "Ready");
+  }
+}
+
+function setProviderChoice(provider) {
+  if (busy) return;
+  setupSettings.provider = provider === "qwen" ? "qwen" : "procedural";
+  syncSetupDirector();
+}
+
+function syncSetupDirector(note) {
+  const wantsQwen = setupSettings.provider === "qwen";
+  dom.providerChoices.forEach((button) => {
+    const selected = button.dataset.providerChoice === setupSettings.provider;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+    button.disabled = busy;
   });
-  await saveRun();
-  render();
+  dom.prepareQwen.disabled = busy || qwen.ready;
+  dom.prepareQwen.textContent = qwen.ready ? "Qwen Ready" : "Prepare Qwen";
+  dom.setupDirector.textContent = wantsQwen
+    ? qwen.ready ? "Qwen Director" : "Qwen Pending"
+    : "Local Director";
+  if (note) {
+    dom.setupModelNote.textContent = note;
+  } else if (qwen.ready) {
+    dom.setupModelNote.textContent = wantsQwen ? "Qwen ready." : "Qwen ready, local selected.";
+  } else if (wantsQwen) {
+    dom.setupModelNote.textContent = "Qwen selected. It will be prepared before the run.";
+  } else {
+    dom.setupModelNote.textContent = "Local director ready.";
+  }
+  if (!state || dom.play.hidden) {
+    dom.headerMode.textContent = qwen.ready ? "Qwen Ready" : "Story Director Ready";
+  }
+}
+
+function setActivePanel(panel) {
+  activePanel = ["hero", "quest", "pack", "director"].includes(panel) ? panel : "hero";
+  syncPanelTabs();
+}
+
+function syncPanelTabs() {
+  dom.panelTabs.forEach((button) => {
+    const selected = button.dataset.panelTab === activePanel;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+  dom.panelPages.forEach((page) => {
+    page.classList.toggle("is-active", page.dataset.panelPage === activePanel);
+  });
 }
 
 function completeQuest(message) {
@@ -529,8 +619,10 @@ function render() {
 
   const story = state.generated.story;
   const stats = heroStats();
+  const qwenActive = qwen.ready && state.settings.provider === "qwen";
   dom.floorLabel.textContent = `Floor ${state.floor}`;
   dom.placeName.textContent = floor.name;
+  dom.headerMode.textContent = state.gameOver ? "Run ended" : qwenActive ? "Qwen Director Active" : "Local Director Active";
   dom.turn.textContent = state.gameOver ? "Defeated" : `Turn ${state.turn}`;
   dom.hp.textContent = `${state.player.hp}/${state.player.maxHp}`;
   dom.level.textContent = String(state.player.level);
@@ -545,12 +637,13 @@ function render() {
   dom.questCopy.textContent = story.quest.description;
   renderInventory();
   dom.log.innerHTML = state.log.slice(-10).reverse().map((line) => `<li>${escapeHtml(line)}</li>`).join("");
-  dom.directorMode.textContent = qwen.ready && state.settings.provider === "qwen" ? "Qwen Director" : "Local Director";
-  dom.modelNote.textContent = qwen.ready
-    ? "Qwen is loaded for new uncached chunks."
+  dom.directorMode.textContent = qwenActive ? "Qwen Director" : "Local Director";
+  dom.modelNote.textContent = qwenActive
+    ? "Qwen is loaded for uncached chunks."
     : state.settings.provider === "qwen"
-      ? "Qwen unavailable, using local fallback."
+      ? "Qwen was not prepared. Local fallback is active."
       : "Stable local generation is active.";
+  syncPanelTabs();
   setActionDisabled(state.gameOver || busy);
   dom.play.classList.toggle("game-over", state.gameOver);
   syncMusicButton();
@@ -700,8 +793,8 @@ function setActionDisabled(disabled) {
 function fitBoard() {
   if (!state?.currentFloor || !dom.boardFrame) return;
   const frame = dom.boardFrame.getBoundingClientRect();
-  const width = Math.max(180, frame.width - 16);
-  const height = Math.max(120, frame.height - 16);
+  const width = Math.max(180, frame.width - 8);
+  const height = Math.max(120, frame.height - 8);
   const ratio = state.currentFloor.width / state.currentFloor.height;
   const fittedWidth = Math.min(width, height * ratio);
   const fittedHeight = fittedWidth / ratio;
@@ -995,7 +1088,7 @@ class ContentDirector {
   async generateJson(run, request) {
     if (run.settings.provider !== "qwen") return request.fallback();
     if (!this.qwen.ready) {
-      appendLog("Browser Qwen is not warm, so the director used the pocket generator.");
+      appendLog("Browser Qwen is not prepared, so the director used the pocket generator.");
       return request.fallback();
     }
     try {

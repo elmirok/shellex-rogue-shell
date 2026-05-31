@@ -93,7 +93,7 @@ The game validates and normalizes every generated object. Map topology is still 
 The requested model family is Qwen 0.5B. The browser-first path is:
 
 - Use a WebGPU-capable browser runtime where possible.
-- Load Qwen only after an explicit user action.
+- Prepare Qwen only from setup, before a run starts.
 - Keep one model instance for the app session.
 - Request small JSON chunks with strict prompts.
 - Cap prompt size and output size per content type.
