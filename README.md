@@ -32,10 +32,14 @@ https://github.com/elmirok/shellex-rogue-shell/package.sapp.json
 From Shellex Shell:
 
 ```txt
-limax repo add https://github.com/elmirok/shellex-rogue-shell RogueShell
+limax repo sync
+limax install W3
 limax install RogueShell
+w3
 rogueshell
 ```
+
+Fresh vaults need `W3` installed before webapp windows can open. Without it, Shellex correctly reports `No window manager installed` when `rogueshell` is launched.
 
 For local testing in Shellex, use `install-app` and choose `package.sapp.json`.
 

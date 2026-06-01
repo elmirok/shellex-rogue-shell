@@ -726,8 +726,12 @@ function setProviderChoice(provider) {
   if (busy) return;
   setupSettings.provider = provider === "qwen" ? "qwen" : "procedural";
   setupSettings.aiNarrator = provider === "qwen" ? "local" : "template";
-  setupSettings.aiMode = provider === "qwen" && setupSettings.aiMode === "classic" ? "lite" : setupSettings.aiMode;
-  if (provider !== "qwen") localAiReady = false;
+  if (provider === "qwen") {
+    setupSettings.aiMode = setupSettings.aiMode === "classic" ? "lite" : setupSettings.aiMode;
+  } else {
+    setupSettings.aiMode = "classic";
+    localAiReady = false;
+  }
   applySettingsToUi(setupSettings);
   reportAiStatus(provider === "qwen"
     ? "AI Lite selected. Press Prepare AI Lite to try local model loading, or start with template fallback."
@@ -1038,6 +1042,24 @@ function aiModeLabel(mode) {
   return AI_MODES[mode]?.label || "Classic Mode";
 }
 
+function runModeLabel(settings = {}) {
+  if (settings.aiNarrator === "local") {
+    return localAiReady ? `${aiModeLabel(settings.aiMode)} Active` : `${aiModeLabel(settings.aiMode)} Fallback`;
+  }
+  if (settings.aiNarrator === "mock") return "Mock AI Active";
+  if (settings.aiNarrator === "off") return "Classic Active";
+  return "Classic Active";
+}
+
+function directorModeLabel(settings = {}) {
+  if (settings.aiNarrator === "local") {
+    return localAiReady ? aiModeLabel(settings.aiMode) : `${aiModeLabel(settings.aiMode)} Fallback`;
+  }
+  if (settings.aiNarrator === "mock") return "Mock AI";
+  if (settings.aiNarrator === "off") return "Narrator Off";
+  return "Classic Mode";
+}
+
 function modelStatusText(settings = {}) {
   if (settings.aiNarrator === "off") return "AI narration is off. The deterministic engine is in full control.";
   if (settings.aiNarrator === "local") {
@@ -1150,10 +1172,9 @@ function render() {
   const story = state.generated.story;
   const stats = heroStats();
   const qwenActive = qwen.ready && state.settings.provider === "qwen";
-  const aiLabel = aiModeLabel(state.settings.aiMode);
   dom.floorLabel.textContent = `Floor ${state.floor}`;
   dom.placeName.textContent = floor.name;
-  dom.headerMode.textContent = state.gameOver ? "Run ended" : qwenActive ? "Legacy Qwen Warm" : `${aiLabel} Active`;
+  dom.headerMode.textContent = state.gameOver ? "Run ended" : qwenActive ? "Legacy Qwen Warm" : runModeLabel(state.settings);
   dom.turn.textContent = state.gameOver ? "Defeated" : `Turn ${state.turn}`;
   dom.hp.textContent = `${state.player.hp}/${state.player.maxHp}`;
   dom.level.textContent = String(state.player.level);
@@ -1172,7 +1193,7 @@ function render() {
   dom.questCopy.textContent = story.quest.description;
   renderInventory();
   dom.log.innerHTML = state.log.slice(-6).reverse().map((line) => `<li>${escapeHtml(line)}</li>`).join("");
-  dom.directorMode.textContent = qwenActive ? "Legacy Qwen Warm" : aiLabel;
+  dom.directorMode.textContent = qwenActive ? "Legacy Qwen Warm" : directorModeLabel(state.settings);
   dom.modelNote.textContent = qwenActive
     ? "The old Qwen loader is warm, but gameplay truth still comes from the deterministic engine."
     : modelStatusText(state.settings);

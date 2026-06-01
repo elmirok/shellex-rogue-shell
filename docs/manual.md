@@ -190,6 +190,20 @@ Rogue Shell autosaves in the Shellex vault:
 
 Use Settings to export or import a save file, clear generated lore cache, or request persistent browser storage.
 
+## Installing In Shellex
+
+In a fresh vault, install the window manager before launching Rogue Shell:
+
+```txt
+limax repo sync
+limax install W3
+limax install RogueShell
+w3
+rogueshell
+```
+
+If `rogueshell` says there is no window manager installed, install and start `W3`, then run `rogueshell` again.
+
 ## Survival Advice
 
 Open doors when you are ready.

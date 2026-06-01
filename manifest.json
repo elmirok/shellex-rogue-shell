@@ -1,7 +1,7 @@
 {
   "id": "games.rogue-shell.local",
   "name": "Rogue Shell",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": "Boaz Alhadeff / Shellex",
   "description": "A vault-first AI roguelike POC for Shellex OS.",
   "repository": "https://github.com/elmirok/shellex-rogue-shell",

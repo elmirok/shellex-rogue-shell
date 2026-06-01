@@ -30,6 +30,8 @@ Rogue Shell follows the static Shellex app model:
 
 Limax compatibility depends on updating `manifest.json` and regenerating `package.sapp.json` when the app changes.
 
+Fresh vault compatibility also depends on `system.w3.local`: Shellex can install Rogue Shell without W3, but webapp windows only open after the W3 window manager is installed and running.
+
 ## Layering
 
 ```txt
