@@ -9,6 +9,8 @@ if (!manifest?.name) errors.push("manifest.name is required");
 if (manifest?.type !== "webapp") errors.push("Rogue Shell must be a webapp package");
 if (manifest?.runtime !== "iframe") errors.push("Rogue Shell must use iframe runtime");
 if (!files?.[manifest?.entry]) errors.push(`entry file missing: ${manifest?.entry}`);
+if (!files?.[manifest?.entry]?.includes('src="./app.js"')) errors.push("entry file must load app.js");
+if (!files?.[manifest?.entry]?.includes('href="./style.css"')) errors.push("entry file must load style.css");
 for (const required of [
   "index.html",
   "style.css",

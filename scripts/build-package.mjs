@@ -4,12 +4,7 @@ const manifest = JSON.parse(await readFile("manifest.json", "utf8"));
 const files = {};
 
 for (const name of await listSourceFiles("src")) {
-  let content = await readFile(`src/${name}`, "utf8");
-  if (name.endsWith("index.html")) {
-    content = content.replace(/\n?\s*<link[^>]*data-dev-only[^>]*>\s*/g, "\n");
-    content = content.replace(/\n\s*<script[^>]*data-dev-only[^>]*><\/script>\s*/g, "\n");
-  }
-  files[name] = content;
+  files[name] = await readFile(`src/${name}`, "utf8");
 }
 
 files["README.md"] = await readFile("README.md", "utf8");
