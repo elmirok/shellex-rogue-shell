@@ -1,12 +1,29 @@
 # Rogue Shell
 
-Rogue Shell is a Shellex OS roguelike POC.
+Rogue Shell is a browser-first Shellex roguelike. It is a static webapp package that runs from the Shellex vault, autosaves under its own appdata folder, and can also be hosted from any static host such as Cloudflare Pages.
 
-The game is packaged as a vault-installable Shellex `.sapp` webapp. A player enters a story prompt, then the game builds a run from generated story, quest, floor, enemy and item chunks. Generated chunks are cached in the Shellex vault so movement stays instant and the content engine is only asked for new material at deliberate boundaries.
+The design rule is:
+
+```txt
+The engine builds the dungeon.
+The dice decide the truth.
+The local AI gives the world a soul.
+```
+
+Gameplay never requires a backend, account, API key, paid inference, database, telemetry, or server-side model. Local AI narration is optional and lazy-loaded.
+
+## Modes
+
+- Classic Mode: no AI model. Procedural dungeon, d20-style combat, templates, WebAudio music, optional browser voice.
+- AI Lite: optional local narrator profile, intended for Qwen3-0.6B WebLLM/MLC-compatible packs. 8GB RAM and 2-3GB free storage recommended.
+- AI Dungeon Master: optional richer local storytelling profile, intended for Qwen3-1.7B packs. 16GB RAM and 4-6GB free storage recommended.
+- High Quality Local: opt-in stronger profile, intended for Qwen3-4B packs on strong desktop hardware. 24-32GB RAM and 8-12GB free storage recommended.
+
+Classic Mode is the default and remains fully playable if WebGPU, model loading, or storage persistence is unavailable.
 
 ## Shellex Install
 
-Rogue Shell exposes the package file Shellex Limax expects:
+Rogue Shell exposes the package file Limax expects:
 
 ```txt
 https://github.com/elmirok/shellex-rogue-shell/package.sapp.json
@@ -20,37 +37,106 @@ limax install RogueShell
 rogueshell
 ```
 
-For local testing, use Shellex `install-app` and choose `package.sapp.json`.
+For local testing in Shellex, use `install-app` and choose `package.sapp.json`.
 
-## POC Scope
+## Local Development
 
-- Static Shellex webapp runtime: HTML, CSS and browser JavaScript.
-- Root `package.sapp.json` generated from source files.
-- Scoped vault storage at `/appdata/games.rogue-shell.local`.
-- Playable turn-based dungeon map with keyboard and button movement.
-- Story prompt, generated story bible, generated floors, generated quests, items and enemies.
-- Fixed viewport game surface with intro screen, always-visible run log and animated tiles.
-- Seed-generated adaptive WebAudio music and action sound effects.
-- Audio pauses or disposes when the app is hidden, closed or returned to setup.
-- Save button plus autosave to the appdata folder in the Shellex vault.
-- Pack inventory with usable tonics, equippable gear, XP, levels and hero attributes.
-- Interact action for map landmarks marked with `?`.
-- Intro-screen director setup for local generation or browser Qwen before a run starts.
-- Tabbed in-run menu for hero stats, quest, pack and director status.
-- Lazy content director: story on new run, floor chunks on stairs, beats on request.
-- Browser Qwen adapter is explicit and lazy; it never loads at app boot.
-- Procedural fallback keeps the POC playable when browser model loading is unavailable.
+Open `src/index.html` directly, or serve the folder with any static server:
 
-## Build
+```bash
+npx http-server src -p 4173
+```
+
+Build the Shellex package:
 
 ```bash
 npm run package
 ```
 
-This writes and validates `package.sapp.json`.
+Build static hosting files:
 
-## Browser Model Note
+```bash
+npm run build:static
+```
 
-The intended local model path is Qwen 0.5B in the browser. For the POC, Browser Qwen is prepared from the intro screen before a run starts and uses Transformers.js with `Mozilla/Qwen2.5-0.5B-Instruct` when WebGPU is available. If it cannot load, Rogue Shell falls back to the compact pocket generator and keeps running.
+Run smoke tests:
 
-See [docs/architecture.md](docs/architecture.md) for the full content-generation plan.
+```bash
+npm test
+```
+
+## Cloudflare Pages
+
+Rogue Shell does not need server routes or environment secrets.
+
+- Build command: `npm run build:static`
+- Output directory: `dist`
+- Runtime: static files only
+
+Do not place large model files in the app bundle. Local model support is designed for browser cache, user-imported packs, or remote public model manifests.
+
+## Engine Contract
+
+The deterministic engine owns:
+
+- map validity, walls, floors, doors, stairs, traps and fog of war
+- movement, collision, turns and death
+- d20 attack rolls, damage rolls, saving throws and checks
+- monsters, loot placement, XP, levels, inventory and equipment
+- save/load, export/import and cache integrity
+
+The AI layer may only generate:
+
+- room descriptions
+- monster barks
+- item lore
+- scroll text
+- quest hooks
+- music mood instructions
+- memory summaries
+
+AI output is validated before use and cannot invent actual exits, loot, traps, monsters, hits, misses or rewards.
+
+## Browser Features
+
+- SpeechSynthesis provides optional browser voice narration.
+- WebAudio provides procedural music and sound effects.
+- Storage Manager APIs are used when available for quota estimates and persistence requests.
+- WebGPU is only probed for optional local AI.
+
+## Save And Storage
+
+Autosave and manual save write to:
+
+```txt
+/appdata/games.rogue-shell.local/save.json
+```
+
+The in-game Settings panel can export/import the save JSON, clear generated lore cache, and request persistent browser storage when supported.
+
+## Repository Shape
+
+```txt
+src/
+  index.html
+  style.css
+  app.js
+  ai/
+    adapters.js
+    model-manifest.js
+    prompts.js
+    router.js
+    schemas.js
+  core/
+    narrator.js
+    rules.js
+    storage.js
+    symbols.js
+scripts/
+  build-package.mjs
+  build-static.mjs
+  check-package.mjs
+  smoke-test.mjs
+```
+
+See [docs/architecture.md](docs/architecture.md) for the implementation architecture.

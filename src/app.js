@@ -1,7 +1,28 @@
+import { AIRouter, MemoryCacheStore } from "./ai/router.js";
+import { AI_MODES, modelProfile } from "./ai/model-manifest.js";
+import { BrowserNarrator } from "./core/narrator.js";
+import { attackRoll, heroRulesStats, migrateAbilities, rollFormula, savingThrow } from "./core/rules.js";
+import { SYMBOLS, inferThemePreset, itemSymbol, monsterSymbol, themePreset } from "./core/symbols.js";
+import { downloadJson, formatBytes, readFileAsText, requestPersistentStorage, storageStatus } from "./core/storage.js";
+
 const APP_ID = "games.rogue-shell.local";
 const DATA_DIR = `/appdata/${APP_ID}`;
 const SAVE_PATH = `${DATA_DIR}/save.json`;
 const DEFAULT_PROMPT = "A broken moon has fallen into an encrypted archive. I am a scavenger trying to reach the root directory before rival ghosts rewrite the world.";
+const DEFAULT_SETTINGS = Object.freeze({
+  provider: "procedural",
+  qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
+  musicEnabled: true,
+  musicMode: "procedural",
+  rulesMode: "d20",
+  aiNarrator: "template",
+  aiMode: "classic",
+  cacheAi: true,
+  voiceEnabled: false,
+  voiceRate: 1,
+  voiceURI: "",
+  narrationDetail: "important"
+});
 
 const dom = {
   app: document.querySelector("[data-app]"),
@@ -27,9 +48,13 @@ const dom = {
   level: document.querySelector("[data-level]"),
   xp: document.querySelector("[data-xp]"),
   gold: document.querySelector("[data-gold]"),
-  might: document.querySelector("[data-might]"),
-  guard: document.querySelector("[data-guard]"),
-  focus: document.querySelector("[data-focus]"),
+  str: document.querySelector("[data-str]"),
+  dex: document.querySelector("[data-dex]"),
+  con: document.querySelector("[data-con]"),
+  int: document.querySelector("[data-int]"),
+  wis: document.querySelector("[data-wis]"),
+  cha: document.querySelector("[data-cha]"),
+  ac: document.querySelector("[data-ac]"),
   attack: document.querySelector("[data-attack]"),
   equipment: document.querySelector("[data-equipment]"),
   questTitle: document.querySelector("[data-quest-title]"),
@@ -48,7 +73,25 @@ const dom = {
   newRun: document.querySelector("[data-new-run]"),
   musicToggle: document.querySelector("[data-music-toggle]"),
   musicStatus: document.querySelector("[data-music-status]"),
-  introLine: document.querySelector("[data-intro-line]")
+  introLine: document.querySelector("[data-intro-line]"),
+  rulesMode: document.querySelector("[data-rules-mode]"),
+  aiNarrator: document.querySelector("[data-ai-narrator]"),
+  aiMode: document.querySelector("[data-ai-mode]"),
+  aiProfileNote: document.querySelector("[data-ai-profile-note]"),
+  prepareLocalAi: document.querySelector("[data-prepare-local-ai]"),
+  voiceEnabled: document.querySelector("[data-voice-enabled]"),
+  voiceSelect: document.querySelector("[data-voice-select]"),
+  voiceRate: document.querySelector("[data-voice-rate]"),
+  voiceStop: document.querySelector("[data-voice-stop]"),
+  voiceRepeat: document.querySelector("[data-voice-repeat]"),
+  musicMode: document.querySelector("[data-music-mode]"),
+  storageStatus: document.querySelector("[data-storage-status]"),
+  exportSave: document.querySelector("[data-export-save]"),
+  importSave: document.querySelector("[data-import-save]"),
+  importFile: document.querySelector("[data-import-file]"),
+  clearAiCache: document.querySelector("[data-clear-ai-cache]"),
+  persistStorage: document.querySelector("[data-persist-storage]"),
+  featureStatus: document.querySelector("[data-feature-status]")
 };
 
 let state = null;
@@ -65,8 +108,11 @@ const api = createShellexApi();
 let qwen = null;
 let director = null;
 let composer = null;
+let aiRouter = null;
+let aiCache = null;
+let narrator = null;
 let boardObserver = null;
-let setupSettings = { provider: "procedural" };
+let setupSettings = { ...DEFAULT_SETTINGS };
 let activePanel = "hero";
 let sidePanelOpen = false;
 
@@ -82,6 +128,25 @@ function bindUi() {
   dom.musicToggle.addEventListener("click", () => toggleMusic());
   dom.inventory.addEventListener("click", (event) => handleInventoryClick(event));
   dom.panelToggle.addEventListener("click", () => setSidePanelOpen(!sidePanelOpen));
+  dom.rulesMode?.addEventListener("change", () => syncSettingsFromUi());
+  dom.aiNarrator?.addEventListener("change", () => syncSettingsFromUi());
+  dom.aiMode?.addEventListener("change", () => syncSettingsFromUi());
+  dom.prepareLocalAi?.addEventListener("click", () => prepareLocalAi());
+  dom.voiceEnabled?.addEventListener("change", () => syncSettingsFromUi());
+  dom.voiceSelect?.addEventListener("change", () => syncSettingsFromUi());
+  dom.voiceRate?.addEventListener("input", () => syncSettingsFromUi());
+  dom.voiceStop?.addEventListener("click", () => narrator?.stop());
+  dom.voiceRepeat?.addEventListener("click", () => narrator?.repeat());
+  dom.musicMode?.addEventListener("change", () => syncSettingsFromUi());
+  dom.exportSave?.addEventListener("click", () => exportSaveFile());
+  dom.importSave?.addEventListener("click", () => dom.importFile?.click());
+  dom.importFile?.addEventListener("change", () => {
+    const file = dom.importFile.files?.[0];
+    if (file) importSaveFile(file);
+    dom.importFile.value = "";
+  });
+  dom.clearAiCache?.addEventListener("click", () => clearAiCache());
+  dom.persistStorage?.addEventListener("click", () => persistBrowserStorage());
   dom.providerChoices.forEach((button) => {
     button.addEventListener("click", () => setProviderChoice(button.dataset.providerChoice));
   });
@@ -106,6 +171,25 @@ function bindUi() {
     if (key === "escape" && sidePanelOpen) {
       event.preventDefault();
       setSidePanelOpen(false);
+      return;
+    }
+    if (key === "escape") {
+      narrator?.stop();
+      return;
+    }
+    if (key === "v") {
+      event.preventDefault();
+      toggleVoiceNarrator();
+      return;
+    }
+    if (key === "n") {
+      event.preventDefault();
+      narrator?.repeat();
+      return;
+    }
+    if (key === " ") {
+      event.preventDefault();
+      narrator?.stop();
       return;
     }
     const moves = {
@@ -140,19 +224,26 @@ function bindUi() {
     boardObserver.observe(dom.boardFrame);
   }
   window.addEventListener("resize", () => fitBoard());
+  window.speechSynthesis?.addEventListener?.("voiceschanged", () => refreshVoiceList());
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stopMusicForLifecycle("score paused");
+    if (document.hidden) narrator?.stop();
   });
   window.addEventListener("pagehide", disposeMusicForLifecycle);
   window.addEventListener("beforeunload", disposeMusicForLifecycle);
   window.addEventListener("freeze", () => stopMusicForLifecycle("score paused"));
   syncSetupDirector();
+  applySettingsToUi(setupSettings);
+  refreshVoiceList();
+  refreshStorageStatus();
+  refreshFeatureStatus();
   syncPanelTabs();
   syncSidePanel();
 }
 
 async function startRun() {
   if (busy) return;
+  syncSettingsFromUi();
   const requestedProvider = setupSettings.provider;
   if (requestedProvider === "qwen" && !qwen.ready) {
     await prepareQwen();
@@ -160,8 +251,17 @@ async function startRun() {
   const activeProvider = requestedProvider === "qwen" && qwen.ready ? "qwen" : "procedural";
   const storyPrompt = (dom.prompt.value || DEFAULT_PROMPT).trim().slice(0, 1200);
   const seed = hashString(`${storyPrompt}:${Date.now()}`);
+  const settings = {
+    ...DEFAULT_SETTINGS,
+    ...currentSettings(),
+    provider: activeProvider,
+    qwenModel: modelProfile(currentSettings().aiMode).modelId || qwen.model,
+    musicEnabled: dom.musicToggle.dataset.enabled !== "false",
+    musicMode: dom.musicMode?.value || setupSettings.musicMode || DEFAULT_SETTINGS.musicMode
+  };
   state = {
-    schema: "rogue-shell-save-v1",
+    schema: "rogue-shell-save-v2",
+    schemaVersion: 2,
     appId: APP_ID,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -178,6 +278,14 @@ async function startRun() {
       xpNext: 12,
       xp: 0,
       gold: 0,
+      abilities: {
+        str: 14,
+        dex: 12,
+        con: 13,
+        int: 10,
+        wis: 11,
+        cha: 10
+      },
       base: {
         might: 2,
         guard: 1,
@@ -195,15 +303,23 @@ async function startRun() {
     generated: {
       story: null,
       floors: {},
-      beats: []
+      beats: [],
+      roomFlavor: {},
+      aiCache: {},
+      memory: {
+        rooms: [],
+        floors: [],
+        artifacts: [],
+        deaths: []
+      }
     },
-    settings: {
-      provider: activeProvider,
-      qwenModel: qwen.model,
-      musicEnabled: dom.musicToggle.dataset.enabled !== "false"
-    },
+    settings,
     currentFloor: null
   };
+  aiCache.bucket = state.generated.aiCache;
+  aiRouter.configure(state.settings);
+  narrator.configure(state.settings);
+  applySettingsToUi(state.settings);
 
   showPlay();
   await startMusic();
@@ -224,9 +340,13 @@ async function loadRun() {
   try {
     const text = await api.fs.readFile(SAVE_PATH);
     const loaded = JSON.parse(text);
-    if (loaded?.schema !== "rogue-shell-save-v1") throw new Error("Unknown save format.");
+    if (!["rogue-shell-save-v1", "rogue-shell-save-v2"].includes(loaded?.schema)) throw new Error("Unknown save format.");
     state = normalizeRun(loaded);
     state.currentFloor = state.currentFloor || state.generated?.floors?.[String(state.floor)] || null;
+    aiCache.bucket = state.generated.aiCache;
+    aiRouter.configure(state.settings);
+    narrator.configure(state.settings);
+    applySettingsToUi(state.settings);
     showPlay();
     await startMusic();
     appendLog("Vault save loaded.");
@@ -288,9 +408,75 @@ async function enterFloor(depth) {
   state.player.y = state.currentFloor.start.y;
   fx.revealDepth = depth;
   fx.revealAt = Date.now();
+  updateVisibility(state.currentFloor);
   if (depth > 1) composer?.sfx("stairs");
-  composer?.update(state);
   appendLog(`Descended into ${state.currentFloor.name}.`);
+  await ensureRoomFlavor();
+  composer?.update(state);
+}
+
+async function ensureRoomFlavor() {
+  if (!state?.currentFloor) return null;
+  const floor = state.currentFloor;
+  const themeName = floor.themePreset || state.generated.story?.themePreset || inferThemePreset(state.storyPrompt);
+  const theme = themePreset(themeName);
+  const symbolsPresent = collectFloorSymbols(floor);
+  const living = livingEnemies();
+  const traps = floor.traps?.filter((trap) => !trap.triggered) || [];
+  const fallback = {
+    room_name: floor.name,
+    description: `${floor.mood}. ${floor.objective}`,
+    tone: theme.tone,
+    theme: themeName,
+    suggested_symbols: symbolsPresent,
+    danger_hint: dangerHint(living.length, traps.length),
+    music: theme.music
+  };
+  const input = {
+    seed: state.seed,
+    floor: floor.depth,
+    roomId: floor.depth,
+    theme: themeName,
+    themeLabel: themeName,
+    floorName: floor.name,
+    symbolsPresent,
+    contents: {
+      monsters: living.length,
+      items: floor.items.filter((item) => !item.taken).length,
+      traps: traps.length,
+      landmark: floor.landmarks.find((landmark) => !landmark.claimed)?.name || ""
+    },
+    dangerLevel: Math.min(9, living.length + traps.length + Math.floor(floor.depth / 2)),
+    music: theme.music,
+    memory: state.generated.memory?.floors?.slice(-3) || []
+  };
+  const flavor = await aiRouter.generateRoomFlavor(input, fallback);
+  state.generated.roomFlavor[String(floor.depth)] = flavor;
+  state.generated.memory.rooms.push({ floor: floor.depth, name: flavor.room_name, theme: flavor.theme });
+  appendLog(`${flavor.room_name}: ${flavor.description}`);
+  if (flavor.danger_hint) appendLog(flavor.danger_hint);
+  narrate(`${flavor.room_name}. ${flavor.description}`);
+  return flavor;
+}
+
+function collectFloorSymbols(floor) {
+  const symbols = new Set();
+  for (const row of floor.tiles) {
+    for (const glyph of row) symbols.add(glyph);
+  }
+  symbols.add(SYMBOLS.stairsDown.glyph);
+  for (const enemy of floor.enemies || []) if (!enemy.dead) symbols.add(enemy.glyph || SYMBOLS.raider.glyph);
+  for (const item of floor.items || []) if (!item.taken) symbols.add(itemSymbol(item));
+  for (const landmark of floor.landmarks || []) if (!landmark.claimed) symbols.add(SYMBOLS.shrine.glyph);
+  for (const trap of floor.traps || []) if (!trap.triggered) symbols.add(SYMBOLS.trap.glyph);
+  return [...symbols].sort();
+}
+
+function dangerHint(enemyCount, trapCount) {
+  if (enemyCount && trapCount) return "The room has moving threats and patient mechanisms.";
+  if (enemyCount) return "Count the hostile shapes before spending a turn.";
+  if (trapCount) return "The floor has remembered where pain belongs.";
+  return "The quiet is real, for now.";
 }
 
 async function movePlayer(dx, dy) {
@@ -298,10 +484,24 @@ async function movePlayer(dx, dy) {
   const floor = state.currentFloor;
   const nx = state.player.x + dx;
   const ny = state.player.y + dy;
-  if (!isInside(floor, nx, ny) || tileAt(floor, nx, ny) === "#") {
+  const targetTile = tileAt(floor, nx, ny);
+  if (!isInside(floor, nx, ny) || targetTile === SYMBOLS.wall.glyph) {
     markFx("bump", Math.max(0, Math.min(floor.width - 1, nx)), Math.max(0, Math.min(floor.height - 1, ny)));
     composer?.sfx("bump");
     appendLog("Stone, static and old permissions refuse the path.");
+    render();
+    return;
+  }
+  if (targetTile === SYMBOLS.closedDoor.glyph) {
+    setTileAt(floor, nx, ny, SYMBOLS.openDoor.glyph);
+    markFx("step", nx, ny);
+    composer?.sfx("beat");
+    appendLog("The door opens with a stale permission click.");
+    state.turn += 1;
+    enemyTurn();
+    checkDefeat();
+    updateVisibility(floor);
+    await saveRun();
     render();
     return;
   }
@@ -316,6 +516,7 @@ async function movePlayer(dx, dy) {
     composer?.sfx("move");
     collectItemAt(nx, ny);
     inspectLandmark(nx, ny);
+    triggerTrapAt(nx, ny);
   }
 
   state.turn += 1;
@@ -329,11 +530,19 @@ async function movePlayer(dx, dy) {
 function attackEnemy(enemy) {
   const rng = rngFor(`combat:${state.seed}:${state.turn}:${enemy.id}`);
   const stats = heroStats();
-  const damage = stats.attack + Math.floor(rng() * 4);
+  const attack = attackRoll(rng, { attackBonus: stats.attackBonus }, enemy.ac || 10);
+  if (!attack.hit) {
+    markFx("hit", enemy.x, enemy.y);
+    composer?.sfx("bump");
+    appendLog(`You miss ${enemy.name} (${attack.total} vs AC ${attack.targetAc}).`);
+    return;
+  }
+  const formula = attack.critical ? `2d6+${stats.damageBonus}` : `1d6+${stats.damageBonus}`;
+  const damage = Math.max(1, rollFormula(rng, formula).total);
   enemy.hp -= damage;
   markFx("hit", enemy.x, enemy.y);
   composer?.sfx("hit");
-  appendLog(`You hit ${enemy.name} for ${damage}.`);
+  appendLog(`You hit ${enemy.name} for ${damage}${attack.critical ? " critical" : ""}.`);
   if (enemy.hp <= 0) {
     enemy.dead = true;
     const gold = 2 + Math.floor(rng() * 7) + state.floor;
@@ -343,10 +552,6 @@ function attackEnemy(enemy) {
     if (state.generated.story.quest.target === "defeat" && livingEnemies().length === 0) {
       completeQuest("The floor is clear. The quest thread tightens.");
     }
-  } else {
-    const counter = Math.max(1, enemy.atk + Math.floor(rng() * 3) - stats.guard);
-    takeDamage(counter);
-    appendLog(`${enemy.name} answers for ${counter}.`);
   }
 }
 
@@ -356,9 +561,16 @@ function enemyTurn() {
     if (state.player.hp <= 0) break;
     const distance = Math.abs(enemy.x - state.player.x) + Math.abs(enemy.y - state.player.y);
     if (distance === 1) {
-      const damage = Math.max(1, enemy.atk - Math.floor(heroStats().guard / 2));
+      const rng = rngFor(`enemy-attack:${state.seed}:${state.turn}:${enemy.id}`);
+      const stats = heroStats();
+      const attack = attackRoll(rng, { attackBonus: enemy.attackBonus || enemy.atk || 1 }, stats.armorClass);
+      if (!attack.hit) {
+        appendLog(`${enemy.name} misses you (${attack.total} vs AC ${stats.armorClass}).`);
+        continue;
+      }
+      const damage = Math.max(1, rollFormula(rng, attack.critical ? enemy.critDamage || "2d4+1" : enemy.damage || "1d4+1").total);
       takeDamage(damage);
-      appendLog(`${enemy.name} claws at your prompt for ${damage}.`);
+      appendLog(`${enemy.name} hits you for ${damage}.`);
       continue;
     }
     const rng = rngFor(`enemy:${state.seed}:${state.turn}:${enemy.id}`);
@@ -379,7 +591,8 @@ function enemyTurn() {
 }
 
 function isWalkableForEnemy(floor, x, y) {
-  if (!isInside(floor, x, y) || tileAt(floor, x, y) === "#") return false;
+  const glyph = tileAt(floor, x, y);
+  if (!isInside(floor, x, y) || glyph === SYMBOLS.wall.glyph || glyph === SYMBOLS.closedDoor.glyph) return false;
   if (state.player.x === x && state.player.y === y) return false;
   return !livingEnemies().some((enemy) => enemy.x === x && enemy.y === y);
 }
@@ -420,6 +633,7 @@ async function interact() {
   landmark.seen = true;
   landmark.claimed = true;
   appendLog(`${landmark.name}: ${landmark.text}`);
+  narrate(`${landmark.name}. ${landmark.text}`);
   const rng = rngFor(`landmark:${state.seed}:${state.floor}:${landmark.x},${landmark.y}`);
   const roll = rng();
   if (roll < 0.34) {
@@ -474,6 +688,7 @@ async function requestStoryBeat() {
     const beat = await director.generateBeat(state);
     state.generated.beats.push(beat);
     appendLog(`${beat.title}: ${beat.text}`);
+    narrate(`${beat.title}. ${beat.text}`);
     if (beat.reward && state.inventory.length < 8) {
       const gift = createLootItem(beat.reward, "trinket", rngFor(`beat-item:${state.seed}:${state.turn}:${beat.reward}`), state.floor, `beat-${state.turn}`);
       state.inventory.push(gift);
@@ -486,37 +701,25 @@ async function requestStoryBeat() {
 }
 
 async function prepareQwen() {
-  if (busy || qwen.ready) return qwen.ready;
-  const previousProvider = setupSettings.provider;
-  busy = true;
+  if (busy) return false;
+  const previous = { ...setupSettings };
   setupSettings.provider = "qwen";
-  syncSetupDirector("Preparing Qwen...");
-  setEngine("Preparing Qwen");
-  try {
-    await qwen.warm((message) => {
-      dom.setupModelNote.textContent = message;
-      setEngine(message);
-    });
-    setupSettings.provider = "qwen";
-    dom.setupModelNote.textContent = "Qwen ready.";
-    setEngine("Qwen ready");
-    return true;
-  } catch (error) {
-    setupSettings.provider = previousProvider === "qwen" ? "procedural" : previousProvider;
-    dom.setupModelNote.textContent = "Qwen unavailable in this browser frame. Local director ready.";
-    setEngine("Local fallback");
-    await api.ui.notify(`Rogue Shell: ${error.message}. Using local director.`);
-    return false;
-  } finally {
-    busy = false;
-    syncSetupDirector();
-    if (!state) setEngine(qwen.ready ? "Qwen ready" : "Ready");
-  }
+  setupSettings.aiNarrator = "local";
+  setupSettings.aiMode = setupSettings.aiMode === "classic" ? "lite" : setupSettings.aiMode;
+  applySettingsToUi(setupSettings);
+  syncSetupDirector("Preparing optional local AI...");
+  const ready = await prepareLocalAi();
+  if (!ready) setupSettings = { ...previous, provider: "procedural" };
+  syncSetupDirector();
+  return ready;
 }
 
 function setProviderChoice(provider) {
   if (busy) return;
   setupSettings.provider = provider === "qwen" ? "qwen" : "procedural";
+  setupSettings.aiNarrator = provider === "qwen" ? "local" : "template";
+  setupSettings.aiMode = provider === "qwen" && setupSettings.aiMode === "classic" ? "lite" : setupSettings.aiMode;
+  applySettingsToUi(setupSettings);
   syncSetupDirector();
 }
 
@@ -528,27 +731,25 @@ function syncSetupDirector(note) {
     button.setAttribute("aria-pressed", selected ? "true" : "false");
     button.disabled = busy;
   });
-  dom.prepareQwen.disabled = busy || qwen.ready;
-  dom.prepareQwen.textContent = qwen.ready ? "Qwen Ready" : "Prepare Qwen";
+  dom.prepareQwen.disabled = busy;
+  dom.prepareQwen.textContent = wantsQwen ? "Prepare AI Lite" : "Prepare Local AI";
   dom.setupDirector.textContent = wantsQwen
-    ? qwen.ready ? "Qwen Director" : "Qwen Pending"
-    : "Local Director";
+    ? "AI Lite Pending"
+    : "Classic Mode";
   if (note) {
     dom.setupModelNote.textContent = note;
-  } else if (qwen.ready) {
-    dom.setupModelNote.textContent = wantsQwen ? "Qwen ready." : "Qwen ready, local selected.";
   } else if (wantsQwen) {
-    dom.setupModelNote.textContent = "Qwen selected. It will be prepared before the run.";
+    dom.setupModelNote.textContent = "Optional local Qwen3-compatible narrator. Gameplay still works without it.";
   } else {
-    dom.setupModelNote.textContent = "Local director ready.";
+    dom.setupModelNote.textContent = "Classic Mode: no model download, no server, no key.";
   }
   if (!state || dom.play.hidden) {
-    dom.headerMode.textContent = qwen.ready ? "Qwen Ready" : "Story Director Ready";
+    dom.headerMode.textContent = wantsQwen ? "AI Narrator Optional" : "Story Director Ready";
   }
 }
 
 function setActivePanel(panel) {
-  activePanel = ["hero", "quest", "pack", "director"].includes(panel) ? panel : "hero";
+  activePanel = ["hero", "quest", "pack", "director", "settings"].includes(panel) ? panel : "hero";
   syncPanelTabs();
 }
 
@@ -593,6 +794,198 @@ function syncPanelTabs() {
   });
 }
 
+function currentSettings() {
+  return {
+    ...DEFAULT_SETTINGS,
+    ...setupSettings,
+    ...(state?.settings || {}),
+    rulesMode: dom.rulesMode?.value || state?.settings?.rulesMode || setupSettings.rulesMode || DEFAULT_SETTINGS.rulesMode,
+    aiNarrator: dom.aiNarrator?.value || state?.settings?.aiNarrator || setupSettings.aiNarrator || DEFAULT_SETTINGS.aiNarrator,
+    aiMode: dom.aiMode?.value || state?.settings?.aiMode || setupSettings.aiMode || DEFAULT_SETTINGS.aiMode,
+    voiceEnabled: Boolean(dom.voiceEnabled?.checked ?? state?.settings?.voiceEnabled ?? setupSettings.voiceEnabled),
+    voiceURI: dom.voiceSelect?.value || state?.settings?.voiceURI || setupSettings.voiceURI || "",
+    voiceRate: Number(dom.voiceRate?.value || state?.settings?.voiceRate || setupSettings.voiceRate || 1),
+    musicMode: dom.musicMode?.value || state?.settings?.musicMode || setupSettings.musicMode || DEFAULT_SETTINGS.musicMode
+  };
+}
+
+function applySettingsToUi(settings = {}) {
+  const merged = { ...DEFAULT_SETTINGS, ...settings };
+  if (dom.rulesMode) dom.rulesMode.value = merged.rulesMode;
+  if (dom.aiNarrator) dom.aiNarrator.value = merged.aiNarrator;
+  if (dom.aiMode) dom.aiMode.value = merged.aiMode;
+  if (dom.voiceEnabled) dom.voiceEnabled.checked = Boolean(merged.voiceEnabled);
+  if (dom.voiceRate) dom.voiceRate.value = String(merged.voiceRate || 1);
+  if (dom.musicMode) dom.musicMode.value = merged.musicMode || "procedural";
+  refreshAiProfileNote(merged);
+  refreshVoiceList(merged.voiceURI);
+}
+
+function syncSettingsFromUi() {
+  const settings = currentSettings();
+  if (settings.musicMode === "off") settings.musicEnabled = false;
+  if (settings.musicMode !== "off") settings.musicEnabled = true;
+  setupSettings = { ...setupSettings, ...settings };
+  if (state) {
+    state.settings = { ...state.settings, ...settings };
+    if (settings.musicMode === "off") composer?.stop();
+    aiRouter.configure(state.settings);
+    narrator.configure(state.settings);
+    composer?.update(state);
+    saveRun();
+  } else {
+    aiRouter.configure(setupSettings);
+    narrator.configure(setupSettings);
+  }
+  refreshAiProfileNote(settings);
+  refreshFeatureStatus();
+  syncMusicButton();
+}
+
+function refreshAiProfileNote(settings = currentSettings()) {
+  if (!dom.aiProfileNote) return;
+  const profile = modelProfile(settings.aiMode);
+  dom.aiProfileNote.textContent = `${profile.label}: ${profile.description} ${profile.minRam}; ${profile.storage}.`;
+  if (dom.prepareLocalAi) {
+    dom.prepareLocalAi.disabled = settings.aiNarrator !== "local" || busy;
+  }
+}
+
+function refreshVoiceList(selectedUri = currentSettings().voiceURI) {
+  if (!dom.voiceSelect || !narrator) return;
+  const voices = narrator.refreshVoices();
+  const options = voices.length
+    ? voices.map((voice) => `<option value="${escapeHtml(voice.voiceURI)}">${escapeHtml(voice.name)}${voice.lang ? ` (${escapeHtml(voice.lang)})` : ""}</option>`).join("")
+    : `<option value="">Browser default</option>`;
+  dom.voiceSelect.innerHTML = options;
+  if (selectedUri && voices.some((voice) => voice.voiceURI === selectedUri)) {
+    dom.voiceSelect.value = selectedUri;
+  }
+}
+
+async function refreshStorageStatus() {
+  if (!dom.storageStatus) return;
+  const status = await storageStatus();
+  if (!status.supported) {
+    dom.storageStatus.textContent = "Browser storage estimate is unavailable.";
+    return;
+  }
+  dom.storageStatus.textContent = `${formatBytes(status.usage)} used of ${formatBytes(status.quota)}${status.persisted ? "; persistent storage granted." : "; persistence not granted."}`;
+}
+
+function refreshFeatureStatus() {
+  if (!dom.featureStatus) return;
+  const webgpu = "gpu" in navigator ? "WebGPU ready" : "WebGPU unavailable";
+  const speech = "speechSynthesis" in window ? "voice ready" : "voice unavailable";
+  const storage = navigator.storage ? "storage estimate ready" : "storage estimate unavailable";
+  const lowEnd = navigator.deviceMemory && navigator.deviceMemory < 6 ? "low memory warning" : "desktop/mobile budget unknown";
+  dom.featureStatus.textContent = `${webgpu}; ${speech}; ${storage}; ${lowEnd}. Local models are optional.`;
+}
+
+async function prepareLocalAi() {
+  if (busy) return false;
+  syncSettingsFromUi();
+  const settings = currentSettings();
+  if (settings.aiNarrator !== "local") {
+    setEngine("Classic narrator active");
+    return false;
+  }
+  if (!modelProfile(settings.aiMode).modelId) {
+    setEngine("Select AI Lite or higher");
+    return false;
+  }
+  busy = true;
+  refreshAiProfileNote(settings);
+  setEngine("Preparing local AI");
+  try {
+    aiRouter.configure(settings);
+    await aiRouter.warm((message) => {
+      setEngine(message);
+      if (dom.aiProfileNote) dom.aiProfileNote.textContent = message;
+    });
+    setEngine("Local AI ready");
+    if (dom.aiProfileNote) dom.aiProfileNote.textContent = `${aiModeLabel(settings.aiMode)} ready.`;
+    return true;
+  } catch (error) {
+    setEngine("Template fallback");
+    if (state) appendLog(`Local AI unavailable: ${error.message}. Template narrator stays active.`);
+    await api.ui.notify(`Rogue Shell: ${error.message}. Classic Mode remains playable.`);
+    return false;
+  } finally {
+    busy = false;
+    refreshAiProfileNote(settings);
+    render();
+  }
+}
+
+function clearAiCache() {
+  aiCache?.clear();
+  if (state?.generated) {
+    state.generated.roomFlavor = {};
+    state.generated.aiCache = {};
+    aiCache.bucket = state.generated.aiCache;
+    appendLog("Generated lore cache cleared.");
+    saveRun();
+    render();
+  }
+  refreshStorageStatus();
+}
+
+function exportSaveFile() {
+  if (!state) {
+    setEngine("No active save");
+    return;
+  }
+  downloadJson(`rogue-shell-save-${state.seed}.json`, state);
+}
+
+async function importSaveFile(file) {
+  try {
+    const text = await readFileAsText(file);
+    const loaded = JSON.parse(text);
+    if (!["rogue-shell-save-v1", "rogue-shell-save-v2"].includes(loaded?.schema)) throw new Error("Unknown save format.");
+    state = normalizeRun(loaded);
+    state.currentFloor = state.currentFloor || state.generated?.floors?.[String(state.floor)] || null;
+    aiCache.bucket = state.generated.aiCache;
+    aiRouter.configure(state.settings);
+    narrator.configure(state.settings);
+    applySettingsToUi(state.settings);
+    showPlay();
+    await saveRun(true);
+    render();
+  } catch (error) {
+    await api.ui.notify(`Rogue Shell import failed: ${error.message}`);
+  }
+}
+
+async function persistBrowserStorage() {
+  const granted = await requestPersistentStorage();
+  setEngine(granted ? "Storage persisted" : "Persistence unavailable");
+  refreshStorageStatus();
+}
+
+function toggleVoiceNarrator() {
+  if (dom.voiceEnabled) dom.voiceEnabled.checked = !dom.voiceEnabled.checked;
+  syncSettingsFromUi();
+  appendLog(currentSettings().voiceEnabled ? "Browser Voice enabled." : "Browser Voice disabled.");
+  render();
+}
+
+function narrate(text, options = {}) {
+  narrator?.speak(text, options);
+}
+
+function aiModeLabel(mode) {
+  return AI_MODES[mode]?.label || "Classic Mode";
+}
+
+function modelStatusText(settings = {}) {
+  if (settings.aiNarrator === "off") return "AI narration is off. The deterministic engine is in full control.";
+  if (settings.aiNarrator === "local") return "Local model narration is optional and falls back to templates if unavailable.";
+  if (settings.aiNarrator === "mock") return "Mock local AI is active for development; gameplay remains deterministic.";
+  return "Classic Mode template narration is active. No model download is required.";
+}
+
 function completeQuest(message) {
   if (state.generated.story.quest.done) return;
   state.generated.story.quest.done = true;
@@ -611,6 +1004,8 @@ function checkDefeat() {
   composer?.sfx("down");
   composer?.stop();
   appendLog("The run falls silent. Movement is locked. Start a New Run to try again.");
+  state.generated.memory.deaths.push({ floor: state.floor, turn: state.turn, place: state.currentFloor?.name || "unknown" });
+  narrate(`The run falls silent on floor ${state.floor}. ${state.currentFloor?.name || "The vault"} keeps your bones.`);
   setEngine("Run ended");
 }
 
@@ -618,6 +1013,7 @@ function render() {
   if (!state || !state.currentFloor) return;
   state = normalizeRun(state);
   const floor = state.currentFloor;
+  updateVisibility(floor);
   dom.board.style.setProperty("--cols", String(floor.width));
   dom.board.classList.toggle("board-hit", Date.now() < fx.boardHitUntil);
   dom.board.innerHTML = "";
@@ -626,30 +1022,53 @@ function render() {
     for (let x = 0; x < floor.width; x += 1) {
       const tile = document.createElement("div");
       const base = tileAt(floor, x, y);
-      let glyph = base === "#" ? "#" : ".";
-      let kind = base === "#" ? "wall" : "floor";
+      const visible = isVisible(floor, x, y);
+      const seen = Boolean(floor.seen?.[y]?.[x]);
+      let glyph = base;
+      let kind = base === SYMBOLS.wall.glyph
+        ? "wall"
+        : base === SYMBOLS.closedDoor.glyph
+          ? "door"
+          : base === SYMBOLS.openDoor.glyph
+            ? "door-open"
+            : base === SYMBOLS.liquid.glyph
+              ? "liquid"
+              : "floor";
       const landmark = floor.landmarks.find((item) => item.x === x && item.y === y);
       const item = floor.items.find((candidate) => !candidate.taken && candidate.x === x && candidate.y === y);
       const enemy = floor.enemies.find((candidate) => !candidate.dead && candidate.x === x && candidate.y === y);
-      if (floor.stairs.x === x && floor.stairs.y === y) {
-        glyph = ">";
-        kind = "stairs";
-      }
-      if (landmark) {
-        glyph = landmark.claimed ? "!" : "?";
-        kind = "landmark";
-      }
-      if (item) {
-        glyph = item.kind === "heal" ? "+" : "*";
-        kind = "item";
-      }
-      if (enemy) {
-        glyph = enemy.glyph || "e";
-        kind = "enemy";
-      }
-      if (state.player.x === x && state.player.y === y) {
-        glyph = "@";
-        kind = "player";
+      const trap = floor.traps?.find((candidate) => !candidate.triggered && candidate.x === x && candidate.y === y);
+      if (!seen) {
+        glyph = " ";
+        kind = "unseen";
+      } else if (!visible) {
+        glyph = base === SYMBOLS.wall.glyph ? SYMBOLS.wall.glyph : base === SYMBOLS.closedDoor.glyph ? SYMBOLS.closedDoor.glyph : SYMBOLS.floor.glyph;
+        kind = base === SYMBOLS.wall.glyph ? "wall seen" : "seen";
+      } else {
+        if (floor.stairs.x === x && floor.stairs.y === y) {
+          glyph = SYMBOLS.stairsDown.glyph;
+          kind = "stairs";
+        }
+        if (trap && trap.discovered) {
+          glyph = SYMBOLS.trap.glyph;
+          kind = "trap";
+        }
+        if (landmark) {
+          glyph = SYMBOLS.shrine.glyph;
+          kind = "landmark";
+        }
+        if (item) {
+          glyph = itemSymbol(item);
+          kind = "item";
+        }
+        if (enemy) {
+          glyph = enemy.glyph || SYMBOLS.raider.glyph;
+          kind = "enemy";
+        }
+        if (state.player.x === x && state.player.y === y) {
+          glyph = SYMBOLS.player.glyph;
+          kind = "player";
+        }
       }
       const classes = ["tile", kind];
       if (reveal) {
@@ -660,7 +1079,7 @@ function render() {
       if (fx.tileKey === coordKey(x, y)) classes.push(`fx-${fx.tileKind}`);
       tile.className = classes.join(" ");
       tile.textContent = glyph;
-      tile.title = describeTile(kind, enemy, item, landmark);
+      tile.title = seen ? describeTile(kind, visible ? enemy : null, visible ? item : null, visible ? landmark : null) : "unseen";
       dom.board.append(tile);
     }
   }
@@ -668,29 +1087,32 @@ function render() {
   const story = state.generated.story;
   const stats = heroStats();
   const qwenActive = qwen.ready && state.settings.provider === "qwen";
+  const aiLabel = aiModeLabel(state.settings.aiMode);
   dom.floorLabel.textContent = `Floor ${state.floor}`;
   dom.placeName.textContent = floor.name;
-  dom.headerMode.textContent = state.gameOver ? "Run ended" : qwenActive ? "Qwen Director Active" : "Local Director Active";
+  dom.headerMode.textContent = state.gameOver ? "Run ended" : qwenActive ? "Legacy Qwen Warm" : `${aiLabel} Active`;
   dom.turn.textContent = state.gameOver ? "Defeated" : `Turn ${state.turn}`;
   dom.hp.textContent = `${state.player.hp}/${state.player.maxHp}`;
   dom.level.textContent = String(state.player.level);
   dom.xp.textContent = `${state.player.xp}/${state.player.xpNext}`;
   dom.gold.textContent = String(state.player.gold);
-  dom.might.textContent = String(stats.might);
-  dom.guard.textContent = String(stats.guard);
-  dom.focus.textContent = String(stats.focus);
-  dom.attack.textContent = String(stats.attack);
+  dom.str.textContent = String(stats.abilities.str);
+  dom.dex.textContent = String(stats.abilities.dex);
+  dom.con.textContent = String(stats.abilities.con);
+  dom.int.textContent = String(stats.abilities.int);
+  dom.wis.textContent = String(stats.abilities.wis);
+  dom.cha.textContent = String(stats.abilities.cha);
+  dom.ac.textContent = String(stats.armorClass);
+  dom.attack.textContent = `+${stats.attackBonus}`;
   dom.equipment.textContent = equipmentSummary();
   dom.questTitle.textContent = story.quest.done ? `${story.quest.title} (done)` : story.quest.title;
   dom.questCopy.textContent = story.quest.description;
   renderInventory();
-  dom.log.innerHTML = state.log.slice(-10).reverse().map((line) => `<li>${escapeHtml(line)}</li>`).join("");
-  dom.directorMode.textContent = qwenActive ? "Qwen Director" : "Local Director";
+  dom.log.innerHTML = state.log.slice(-6).reverse().map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  dom.directorMode.textContent = qwenActive ? "Legacy Qwen Warm" : aiLabel;
   dom.modelNote.textContent = qwenActive
-    ? "Qwen is loaded for uncached chunks."
-    : state.settings.provider === "qwen"
-      ? "Qwen was not prepared. Local fallback is active."
-      : "Stable local generation is active.";
+    ? "The old Qwen loader is warm, but gameplay truth still comes from the deterministic engine."
+    : modelStatusText(state.settings);
   syncPanelTabs();
   setActionDisabled(state.gameOver || busy);
   dom.play.classList.toggle("game-over", state.gameOver);
@@ -730,8 +1152,11 @@ function gainXp(amount) {
     state.player.xp -= state.player.xpNext;
     state.player.level += 1;
     state.player.xpNext = Math.floor(state.player.xpNext * 1.35 + 6);
-    const growth = ["might", "guard", "focus"][(state.player.level + state.floor) % 3];
-    state.player.base[growth] += 1;
+    const growth = ["str", "dex", "con", "wis"][(state.player.level + state.floor) % 4];
+    state.player.abilities[growth] = Math.min(20, (state.player.abilities[growth] || 10) + 1);
+    if (growth === "str") state.player.base.might += 1;
+    if (growth === "con") state.player.base.guard += 1;
+    if (growth === "dex" || growth === "wis") state.player.base.focus += 1;
     state.player.maxHp += 5;
     state.player.hp = state.player.maxHp;
     appendLog(`Level ${state.player.level}. ${growthLabel(growth)} improved.`);
@@ -740,19 +1165,20 @@ function gainXp(amount) {
 }
 
 function growthLabel(stat) {
+  const labels = { str: "STR", dex: "DEX", con: "CON", int: "INT", wis: "WIS", cha: "CHA", ac: "AC", attack: "Attack", damage: "Damage" };
+  if (labels[stat]) return labels[stat];
   return stat === "might" ? "Might" : stat === "guard" ? "Guard" : "Focus";
 }
 
 function heroStats() {
-  const base = state?.player?.base || { might: 2, guard: 1, focus: 1 };
-  const stats = { might: base.might, guard: base.guard, focus: base.focus };
-  for (const item of equippedItems()) {
-    for (const [key, value] of Object.entries(item.bonus || {})) {
-      stats[key] = (stats[key] || 0) + value;
-    }
-  }
-  stats.attack = 2 + stats.might + Math.floor(stats.focus / 2);
-  return stats;
+  const stats = heroRulesStats(state?.player || {}, equippedItems());
+  return {
+    ...stats,
+    might: stats.skillBonus.might,
+    guard: stats.armorClass - 10,
+    focus: stats.skillBonus.focus,
+    attack: stats.attackBonus
+  };
 }
 
 function equippedItems() {
@@ -777,6 +1203,8 @@ function renderInventory() {
     const bonus = Object.entries(item.bonus || {}).map(([key, value]) => `+${value} ${growthLabel(key)}`).join(", ");
     const action = item.kind === "heal"
       ? `<button type="button" data-inventory-action="use" data-item-id="${escapeHtml(item.id)}">Use</button>`
+      : item.kind === "scroll"
+        ? `<button type="button" data-inventory-action="read" data-item-id="${escapeHtml(item.id)}">Read</button>`
       : item.slot
         ? `<button type="button" data-inventory-action="equip" data-item-id="${escapeHtml(item.id)}">${equipped ? "Unequip" : "Equip"}</button>`
         : "";
@@ -791,6 +1219,7 @@ function renderInventory() {
 
 function itemLabel(item) {
   if (item.kind === "heal") return `tonic, restores ${item.power} HP`;
+  if (item.kind === "scroll") return "scroll, readable lore";
   if (item.slot) return `${item.slot} gear`;
   return item.kind || "relic";
 }
@@ -802,6 +1231,7 @@ function handleInventoryClick(event) {
   const item = state.inventory.find((candidate) => candidate.id === button.dataset.itemId);
   if (!item) return;
   if (button.dataset.inventoryAction === "use") useItem(item);
+  if (button.dataset.inventoryAction === "read") readScroll(item);
   if (button.dataset.inventoryAction === "equip") toggleEquip(item);
   saveRun();
   render();
@@ -814,6 +1244,14 @@ function useItem(item) {
   state.inventory = state.inventory.filter((candidate) => candidate.id !== item.id);
   appendLog(healed > 0 ? `${item.name} restores ${healed} HP.` : `${item.name} was used, but you were already whole.`);
   composer?.sfx("heal");
+}
+
+function readScroll(item) {
+  if (item.kind !== "scroll") return;
+  const text = item.lore || `${item.name} describes only what this floor already contains.`;
+  appendLog(`${item.name}: ${text}`);
+  narrate(`${item.name}. ${text}`);
+  composer?.sfx("beat");
 }
 
 function toggleEquip(item) {
@@ -874,6 +1312,8 @@ async function toggleMusic() {
     composer = composer || new AdaptiveComposer();
     const enabled = dom.musicToggle.dataset.enabled !== "false";
     dom.musicToggle.dataset.enabled = enabled ? "false" : "true";
+    setupSettings.musicEnabled = !enabled;
+    if (dom.musicMode) dom.musicMode.value = enabled ? "off" : "procedural";
     dom.musicToggle.textContent = enabled ? "Music Off" : "Music On";
     dom.musicStatus.textContent = enabled ? "score muted" : "seed score armed";
     if (enabled) composer.stop();
@@ -884,6 +1324,8 @@ async function toggleMusic() {
     await startMusic();
   } else {
     state.settings.musicEnabled = false;
+    state.settings.musicMode = "off";
+    if (dom.musicMode) dom.musicMode.value = "off";
     composer.stop();
   }
   await saveRun();
@@ -891,7 +1333,7 @@ async function toggleMusic() {
 }
 
 async function startMusic() {
-  if (!state?.settings?.musicEnabled) {
+  if (!state?.settings?.musicEnabled || state?.settings?.musicMode === "off") {
     syncMusicButton();
     return;
   }
@@ -917,7 +1359,7 @@ function disposeMusicForLifecycle() {
 }
 
 function syncMusicButton() {
-  const enabled = state?.settings?.musicEnabled ?? dom.musicToggle.dataset.enabled !== "false";
+  const enabled = (state?.settings?.musicEnabled ?? setupSettings.musicEnabled ?? dom.musicToggle.dataset.enabled !== "false") && (state?.settings?.musicMode ?? setupSettings.musicMode) !== "off";
   dom.musicToggle.textContent = enabled ? "Music On" : "Music Off";
   dom.musicToggle.dataset.enabled = enabled ? "true" : "false";
   if (!composer?.playing) {
@@ -950,7 +1392,51 @@ function setEngine(message) {
 }
 
 function tileAt(floor, x, y) {
-  return floor.tiles[y]?.[x] || "#";
+  return floor.tiles[y]?.[x] || SYMBOLS.wall.glyph;
+}
+
+function setTileAt(floor, x, y, glyph) {
+  if (!isInside(floor, x, y)) return;
+  const row = Array.from(floor.tiles[y]);
+  row[x] = glyph;
+  floor.tiles[y] = row.join("");
+}
+
+function updateVisibility(floor) {
+  if (!floor) return;
+  const radius = 6;
+  floor.visible = Array.from({ length: floor.height }, () => Array.from({ length: floor.width }, () => false));
+  floor.seen = floor.seen || Array.from({ length: floor.height }, () => Array.from({ length: floor.width }, () => false));
+  for (let y = 0; y < floor.height; y += 1) {
+    for (let x = 0; x < floor.width; x += 1) {
+      const distance = Math.hypot(x - state.player.x, y - state.player.y);
+      if (distance <= radius) {
+        floor.visible[y][x] = true;
+        floor.seen[y][x] = true;
+      }
+    }
+  }
+}
+
+function isVisible(floor, x, y) {
+  return Boolean(floor.visible?.[y]?.[x]);
+}
+
+function triggerTrapAt(x, y) {
+  const trap = state.currentFloor.traps?.find((candidate) => !candidate.triggered && candidate.x === x && candidate.y === y);
+  if (!trap) return;
+  trap.discovered = true;
+  trap.triggered = true;
+  const rng = rngFor(`trap:${state.seed}:${state.floor}:${x},${y}:${state.turn}`);
+  const save = savingThrow(rng, state.player, trap.save || "dex", trap.dc || 12, false);
+  const roll = rollFormula(rng, trap.damage || "1d6+1");
+  const damage = save.success ? Math.floor(roll.total / 2) : roll.total;
+  takeDamage(damage);
+  markFx("hit", x, y);
+  composer?.sfx("down");
+  appendLog(save.success
+    ? `Trap grazes you for ${damage} (${save.total} vs DC ${save.dc}).`
+    : `Trap hits you for ${damage} (${save.total} vs DC ${save.dc}).`);
 }
 
 function isInside(floor, x, y) {
@@ -963,6 +1449,17 @@ function findEnemy(x, y) {
 
 function livingEnemies() {
   return state.currentFloor.enemies.filter((enemy) => !enemy.dead);
+}
+
+function scaleFromName(name = "") {
+  const key = String(name).toLowerCase();
+  if (key.includes("phryg")) return [0, 1, 3, 5, 7, 8, 10, 12];
+  if (key.includes("dorian")) return [0, 2, 3, 5, 7, 9, 10, 12];
+  if (key.includes("lydian")) return [0, 2, 4, 6, 7, 9, 11, 12];
+  if (key.includes("whole")) return [0, 2, 4, 6, 8, 10, 12, 14];
+  if (key.includes("pent")) return [0, 3, 5, 7, 10, 12, 15, 17];
+  if (key.includes("chrom")) return [0, 1, 2, 3, 5, 6, 8, 9];
+  return [0, 2, 3, 5, 7, 9, 10, 12];
 }
 
 class AdaptiveComposer {
@@ -998,6 +1495,15 @@ class AdaptiveComposer {
 
   update(run) {
     if (!run) return;
+    const mood = run.generated?.roomFlavor?.[String(run.floor)]?.music;
+    if (mood && run.settings?.musicMode === "ai_mood") {
+      this.tempo = Math.max(40, Math.min(160, Number(mood.tempo) || this.tempo));
+      this.scale = scaleFromName(mood.scale);
+      this.wave = Number(mood.density) > 0.58 ? "square" : "triangle";
+      this.motif = Array.from({ length: 12 }, (_, index) => (index * 2 + Math.round((Number(mood.density) || 0.4) * 7)) % this.scale.length);
+      if (this.playing) this.restartClock();
+      return;
+    }
     const story = run.generated?.story;
     const source = `${run.storyPrompt}:${story?.title || ""}:${run.floor || 1}`;
     const rng = rngFor(`music:${hashString(source)}`);
@@ -1164,19 +1670,9 @@ class ContentDirector {
   }
 
   async generateJson(run, request) {
-    if (run.settings.provider !== "qwen") return request.fallback();
-    if (!this.qwen.ready) {
-      appendLog("Browser Qwen is not prepared, so the director used the pocket generator.");
-      return request.fallback();
-    }
-    try {
-      const result = await this.qwen.generateJson(request.prompt, request.maxNewTokens);
-      appendLog(`Browser Qwen generated ${request.kind}.`);
-      return result;
-    } catch (error) {
-      appendLog(`Qwen fallback for ${request.kind}: ${error.message}`);
-      return request.fallback();
-    }
+    void run;
+    void request;
+    return request.fallback();
   }
 }
 
@@ -1230,13 +1726,15 @@ class BrowserQwenProvider {
 function createProceduralStory(prompt, seed) {
   const rng = rngFor(`story:${seed}`);
   const theme = inferTheme(prompt);
+  const themePresetName = inferThemePreset(prompt);
   const title = `${choice(rng, theme.titleA)} ${choice(rng, theme.titleB)}`;
   const factionA = `${choice(rng, theme.factionA)} ${choice(rng, theme.factionB)}`;
   const factionB = `${choice(rng, theme.rivalA)} ${choice(rng, theme.rivalB)}`;
   const relic = `${choice(rng, theme.relicA)} ${choice(rng, theme.relicB)}`;
   return {
     title,
-    premise: sentenceCase(prompt || DEFAULT_PROMPT),
+    premise: sentenceCase(prompt || DEFAULT_PROMPT, 240),
+    themePreset: themePresetName,
     finalGoal: `Reach the root chamber and claim the ${relic}.`,
     biomes: shuffle(rng, theme.biomes).slice(0, 6),
     factions: [factionA, factionB],
@@ -1254,14 +1752,16 @@ function createProceduralStory(prompt, seed) {
 function createProceduralFloor(run, depth, flavor) {
   const story = run.generated.story;
   const rng = rngFor(`floor:${run.seed}:${depth}`);
-  const width = 23;
-  const height = 15;
+  const themePresetName = story.themePreset || inferThemePreset(run.storyPrompt);
+  const preset = themePreset(themePresetName);
+  const width = 27;
+  const height = 17;
   const rooms = carveRooms(rng, width, height);
-  const tiles = Array.from({ length: height }, () => Array.from({ length: width }, () => "#"));
+  const tiles = Array.from({ length: height }, () => Array.from({ length: width }, () => SYMBOLS.wall.glyph));
 
   for (const room of rooms) {
     for (let y = room.y; y < room.y + room.h; y += 1) {
-      for (let x = room.x; x < room.x + room.w; x += 1) tiles[y][x] = ".";
+      for (let x = room.x; x < room.x + room.w; x += 1) tiles[y][x] = SYMBOLS.floor.glyph;
     }
   }
   for (let index = 1; index < rooms.length; index += 1) {
@@ -1275,18 +1775,28 @@ function createProceduralFloor(run, depth, flavor) {
   const itemNames = arrayOr(flavor?.itemNames, story.items);
   const landmarkNames = arrayOr(flavor?.landmarkNames, ["sealed prompt", "quiet archive", "broken index"]);
   const occupied = new Set([coordKey(start.x, start.y), coordKey(stairs.x, stairs.y)]);
+  placeDoors(rng, tiles, rooms, occupied);
+  placeLiquid(rng, tiles, rooms, occupied, preset);
   const enemies = [];
   const enemyCount = Math.min(6, 2 + Math.floor(depth / 2) + Math.floor(rng() * 2));
   for (let index = 0; index < enemyCount; index += 1) {
     const spot = placeInRoom(rng, rooms, occupied);
+    const name = choice(rng, enemyNames);
+    const attackBonus = 2 + Math.floor(depth / 2);
+    const damageBonus = Math.max(1, Math.floor(depth / 3));
     enemies.push({
       id: `e${depth}-${index}`,
-      name: choice(rng, enemyNames),
-      glyph: "e",
+      name,
+      glyph: monsterSymbol(name, themePresetName, index),
       x: spot.x,
       y: spot.y,
       hp: 7 + depth * 2 + Math.floor(rng() * 5),
-      atk: 2 + Math.floor(depth / 2)
+      ac: 10 + Math.min(4, Math.floor(depth / 2)) + (index % 2),
+      atk: attackBonus,
+      attackBonus,
+      damage: `1d4+${damageBonus}`,
+      critDamage: `2d4+${damageBonus}`,
+      xp: 4 + depth
     });
   }
 
@@ -1296,7 +1806,8 @@ function createProceduralFloor(run, depth, flavor) {
     const spot = placeInRoom(rng, rooms, occupied);
     const quest = depth === 2 && index === 0 && story.quest.target === "relic";
     const name = quest ? story.items[0] : choice(rng, itemNames);
-    const loot = createLootItem(name, quest ? "charm" : "trinket", rng, depth, `${depth}-${index}`);
+    const preferred = quest ? "charm" : index === itemCount - 1 && rng() > 0.45 ? "scroll" : "trinket";
+    const loot = createLootItem(name, preferred, rng, depth, `${depth}-${index}`);
     items.push({
       ...loot,
       id: `i${depth}-${index}-${loot.id}`,
@@ -1309,12 +1820,15 @@ function createProceduralFloor(run, depth, flavor) {
   const landmarkSpot = placeInRoom(rng, rooms, occupied);
   const mood = safeText(flavor?.mood) || choice(rng, ["watchful", "fractured", "bright with static", "too quiet"]);
   const objective = safeText(flavor?.objective) || `Find the stairwell beneath ${name}.`;
+  const traps = placeTraps(rng, rooms, occupied, depth, preset);
+  const seen = Array.from({ length: height }, () => Array.from({ length: width }, () => false));
 
   return {
     depth,
     name,
     mood,
     objective,
+    themePreset: themePresetName,
     width,
     height,
     start,
@@ -1322,6 +1836,9 @@ function createProceduralFloor(run, depth, flavor) {
     tiles: tiles.map((row) => row.join("")),
     enemies,
     items,
+    traps,
+    seen,
+    visible: Array.from({ length: height }, () => Array.from({ length: width }, () => false)),
     landmarks: [
       {
         name: choice(rng, landmarkNames),
@@ -1448,14 +1965,70 @@ function carveCorridor(tiles, from, to) {
   let x = from.x;
   let y = from.y;
   while (x !== to.x) {
-    tiles[y][x] = ".";
+    tiles[y][x] = SYMBOLS.floor.glyph;
     x += Math.sign(to.x - x);
   }
   while (y !== to.y) {
-    tiles[y][x] = ".";
+    tiles[y][x] = SYMBOLS.floor.glyph;
     y += Math.sign(to.y - y);
   }
-  tiles[y][x] = ".";
+  tiles[y][x] = SYMBOLS.floor.glyph;
+}
+
+function placeDoors(rng, tiles, rooms, occupied) {
+  for (const room of rooms.slice(1)) {
+    if (rng() < 0.4) continue;
+    const candidates = [];
+    for (let x = room.x; x < room.x + room.w; x += 1) {
+      candidates.push({ x, y: room.y }, { x, y: room.y + room.h - 1 });
+    }
+    for (let y = room.y; y < room.y + room.h; y += 1) {
+      candidates.push({ x: room.x, y }, { x: room.x + room.w - 1, y });
+    }
+    const valid = candidates.filter(({ x, y }) => {
+      if (occupied.has(coordKey(x, y))) return false;
+      if (tiles[y]?.[x] !== SYMBOLS.floor.glyph) return false;
+      const walls = neighbors4(x, y).filter(([nx, ny]) => tiles[ny]?.[nx] === SYMBOLS.wall.glyph).length;
+      return walls >= 1;
+    });
+    const spot = choice(rng, valid);
+    if (spot) tiles[spot.y][spot.x] = SYMBOLS.closedDoor.glyph;
+  }
+}
+
+function placeLiquid(rng, tiles, rooms, occupied, preset) {
+  if (!preset.terrain.includes(SYMBOLS.liquid.glyph) || rng() < 0.45) return;
+  const room = choice(rng, rooms.slice(1));
+  const count = 2 + Math.floor(rng() * 4);
+  for (let index = 0; index < count; index += 1) {
+    const x = room.x + 1 + Math.floor(rng() * Math.max(1, room.w - 2));
+    const y = room.y + 1 + Math.floor(rng() * Math.max(1, room.h - 2));
+    if (!occupied.has(coordKey(x, y)) && tiles[y]?.[x] === SYMBOLS.floor.glyph) tiles[y][x] = SYMBOLS.liquid.glyph;
+  }
+}
+
+function placeTraps(rng, rooms, occupied, depth, preset) {
+  const traps = [];
+  const trapCount = Math.min(5, Math.max(1, Math.round(rooms.length * preset.trapDensity * 3)));
+  for (let index = 0; index < trapCount; index += 1) {
+    if (rng() > preset.trapDensity * 4) continue;
+    const spot = placeInRoom(rng, rooms, occupied);
+    traps.push({
+      id: `t${depth}-${index}`,
+      x: spot.x,
+      y: spot.y,
+      dc: 11 + Math.min(6, depth),
+      save: "dex",
+      damage: `1d6+${Math.max(1, Math.floor(depth / 2))}`,
+      discovered: false,
+      triggered: false
+    });
+  }
+  return traps;
+}
+
+function neighbors4(x, y) {
+  return [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]];
 }
 
 function centerOf(room) {
@@ -1486,11 +2059,11 @@ function coordKey(x, y) {
 function normalizeRun(run) {
   const normalized = run || {};
   normalized.settings = {
-    provider: "procedural",
-    qwenModel: "Mozilla/Qwen2.5-0.5B-Instruct",
-    musicEnabled: true,
+    ...DEFAULT_SETTINGS,
     ...(normalized.settings || {})
   };
+  normalized.schema = normalized.schema || "rogue-shell-save-v2";
+  normalized.schemaVersion = normalized.schemaVersion || (normalized.schema === "rogue-shell-save-v1" ? 1 : 2);
   normalized.player = {
     x: 1,
     y: 1,
@@ -1501,6 +2074,7 @@ function normalizeRun(run) {
     xpNext: 12,
     gold: 0,
     base: { might: 2, guard: 1, focus: 1 },
+    abilities: { str: 14, dex: 12, con: 13, int: 10, wis: 11, cha: 10 },
     equipment: { weapon: null, armor: null, charm: null },
     ...(normalized.player || {})
   };
@@ -1510,6 +2084,7 @@ function normalizeRun(run) {
     focus: 1,
     ...(normalized.player.base || {})
   };
+  normalized.player.abilities = migrateAbilities(normalized.player);
   normalized.player.equipment = {
     weapon: null,
     armor: null,
@@ -1527,6 +2102,7 @@ function normalizeRun(run) {
       slot: item.slot || null,
       power: item.power || 0,
       bonus: item.bonus || {},
+      lore: item.lore || "",
       quest: Boolean(item.quest)
     };
   });
@@ -1540,6 +2116,15 @@ function normalizeRun(run) {
   }
   if (normalized.currentFloor) normalized.currentFloor = normalizeFloor(normalized.currentFloor, normalized.floor || 1);
   normalized.generated.beats = normalized.generated.beats || [];
+  normalized.generated.roomFlavor = normalized.generated.roomFlavor || {};
+  normalized.generated.aiCache = normalized.generated.aiCache || {};
+  normalized.generated.memory = {
+    rooms: [],
+    floors: [],
+    artifacts: [],
+    deaths: [],
+    ...(normalized.generated.memory || {})
+  };
   normalized.log = normalized.log || [];
   normalized.gameOver = Boolean(normalized.gameOver || normalized.player.hp <= 0);
   return normalized;
@@ -1548,6 +2133,10 @@ function normalizeRun(run) {
 function normalizeFloor(floor, depth) {
   if (!floor) return floor;
   const rng = rngFor(`floor-normalize:${depth}`);
+  floor.tiles = floor.tiles || [];
+  floor.width = floor.width || floor.tiles[0]?.length || 23;
+  floor.height = floor.height || floor.tiles.length || 15;
+  floor.themePreset = floor.themePreset || inferThemePreset(state?.storyPrompt || "");
   floor.items = (floor.items || []).map((item, index) => {
     if (item.slot || item.kind === "heal" || item.bonus) return item;
     const loot = createLootItem(item.name || "cache token", item.kind || "trinket", rng, depth, `${depth}-old-${index}`);
@@ -1558,11 +2147,30 @@ function normalizeFloor(floor, depth) {
     hinted: Boolean(landmark.hinted || landmark.seen),
     claimed: Boolean(landmark.claimed)
   }));
+  floor.traps = (floor.traps || []).map((trap, index) => ({
+    id: trap.id || `trap-${depth}-${index}`,
+    x: trap.x,
+    y: trap.y,
+    dc: trap.dc || 12,
+    save: trap.save || "dex",
+    damage: trap.damage || "1d6+1",
+    discovered: Boolean(trap.discovered),
+    triggered: Boolean(trap.triggered)
+  })).filter((trap) => Number.isFinite(trap.x) && Number.isFinite(trap.y));
+  floor.seen = normalizeVisionGrid(floor.seen, floor.width, floor.height);
+  floor.visible = normalizeVisionGrid(floor.visible, floor.width, floor.height);
   return floor;
 }
 
+function normalizeVisionGrid(grid, width, height) {
+  return Array.from({ length: height }, (_, y) => {
+    const row = Array.isArray(grid?.[y]) ? grid[y] : [];
+    return Array.from({ length: width }, (_, x) => Boolean(row[x]));
+  });
+}
+
 function createLootItem(name, preferredKind, rng, depth, suffix) {
-  const kind = preferredKind === "trinket" ? choice(rng, ["weapon", "armor", "charm", "heal"]) : preferredKind;
+  const kind = preferredKind === "trinket" ? choice(rng, ["weapon", "armor", "charm", "heal", "scroll"]) : preferredKind;
   if (kind === "heal") {
     return {
       id: `heal-${suffix}-${hashString(name)}`,
@@ -1571,6 +2179,17 @@ function createLootItem(name, preferredKind, rng, depth, suffix) {
       slot: null,
       power: 6 + depth * 2 + Math.floor(rng() * 6),
       bonus: {}
+    };
+  }
+  if (kind === "scroll") {
+    return {
+      id: `scroll-${suffix}-${hashString(name)}`,
+      name: `${sentenceCase(name)} Scroll`,
+      kind: "scroll",
+      slot: null,
+      power: 0,
+      bonus: {},
+      lore: `${sentenceCase(name)} is written in a hand that refuses to stay still.`
     };
   }
   const slot = kind === "weapon" ? "weapon" : kind === "armor" ? "armor" : "charm";
@@ -1594,6 +2213,7 @@ function stripWorldItem(item) {
     slot: item.slot || null,
     power: item.power || 0,
     bonus: item.bonus || {},
+    lore: item.lore || "",
     quest: Boolean(item.quest)
   };
 }
@@ -1601,7 +2221,8 @@ function stripWorldItem(item) {
 function normalizeStory(candidate, fallback) {
   const story = {
     title: safeText(candidate?.title) || fallback.title,
-    premise: safeText(candidate?.premise) || fallback.premise,
+    premise: safeText(candidate?.premise, 240) || fallback.premise,
+    themePreset: candidate?.themePreset || fallback.themePreset || inferThemePreset(fallback.premise),
     finalGoal: safeText(candidate?.finalGoal) || fallback.finalGoal,
     biomes: arrayOr(candidate?.biomes, fallback.biomes).slice(0, 8),
     factions: arrayOr(candidate?.factions, fallback.factions).slice(0, 4),
@@ -1641,12 +2262,12 @@ function arrayOr(value, fallback) {
     : fallback;
 }
 
-function safeText(value) {
-  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 120) : "";
+function safeText(value, max = 120) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
 }
 
-function sentenceCase(value) {
-  const text = safeText(value);
+function sentenceCase(value, max = 120) {
+  const text = safeText(value, max);
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : DEFAULT_PROMPT;
 }
 
@@ -1750,5 +2371,8 @@ function createShellexApi() {
 
 qwen = new BrowserQwenProvider();
 director = new ContentDirector({ qwen });
+aiCache = new MemoryCacheStore({});
+aiRouter = new AIRouter({ hashString, cacheStore: aiCache });
+narrator = new BrowserNarrator();
 bindUi();
 setEngine("Ready");

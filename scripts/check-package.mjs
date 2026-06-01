@@ -9,7 +9,18 @@ if (!manifest?.name) errors.push("manifest.name is required");
 if (manifest?.type !== "webapp") errors.push("Rogue Shell must be a webapp package");
 if (manifest?.runtime !== "iframe") errors.push("Rogue Shell must use iframe runtime");
 if (!files?.[manifest?.entry]) errors.push(`entry file missing: ${manifest?.entry}`);
-for (const required of ["index.html", "style.css", "app.js"]) {
+for (const required of [
+  "index.html",
+  "style.css",
+  "app.js",
+  "ai/router.js",
+  "ai/adapters.js",
+  "ai/schemas.js",
+  "core/rules.js",
+  "core/symbols.js",
+  "core/narrator.js",
+  "core/storage.js"
+]) {
   if (!files?.[required]) errors.push(`missing file: ${required}`);
 }
 for (const permission of manifest?.permissions || []) {
