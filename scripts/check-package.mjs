@@ -11,6 +11,7 @@ if (manifest?.runtime !== "iframe") errors.push("Rogue Shell must use iframe run
 if (!files?.[manifest?.entry]) errors.push(`entry file missing: ${manifest?.entry}`);
 if (!files?.[manifest?.entry]?.includes('src="./app.js"')) errors.push("entry file must load app.js");
 if (!files?.[manifest?.entry]?.includes('href="./style.css"')) errors.push("entry file must load style.css");
+if (/\bfrom\s+["']\.\//.test(files?.["app.js"] || "")) errors.push("packaged app.js must not depend on relative module imports");
 for (const required of [
   "index.html",
   "style.css",

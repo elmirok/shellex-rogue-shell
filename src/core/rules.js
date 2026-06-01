@@ -35,7 +35,7 @@ export function migrateAbilities(player = {}) {
 export function normalizeAbilities(abilities = {}) {
   return Object.fromEntries(ABILITIES.map((key) => [
     key,
-    clampNumber(abilities[key], 3, 20, DEFAULT_ABILITIES[key])
+    clampAbilityNumber(abilities[key], 3, 20, DEFAULT_ABILITIES[key])
   ]));
 }
 
@@ -140,9 +140,8 @@ function collectBonuses(equipment) {
   return totals;
 }
 
-function clampNumber(value, min, max, fallback) {
+function clampAbilityNumber(value, min, max, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.max(min, Math.min(max, Math.round(number)));
 }
-
