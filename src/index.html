@@ -60,29 +60,32 @@
     <section class="play-layout" data-play hidden>
       <section class="board-shell" aria-label="Dungeon">
         <div class="board-header">
-          <div>
+          <div class="board-title">
             <p class="eyebrow" data-floor-label>Floor 1</p>
             <h2 data-place-name>Booting dungeon...</h2>
           </div>
-          <div class="turn-chip" data-turn>Turn 0</div>
+          <div class="board-command-strip">
+            <div class="action-row" aria-label="Turn controls">
+              <button type="button" data-act="up" aria-label="Move up">^</button>
+              <button type="button" data-act="left" aria-label="Move left">&lt;</button>
+              <button type="button" data-act="down" aria-label="Move down">v</button>
+              <button type="button" data-act="right" aria-label="Move right">&gt;</button>
+              <button type="button" data-interact>Interact</button>
+              <button type="button" data-rest>Rest</button>
+              <button type="button" data-next-beat>Beat</button>
+              <button type="button" data-save>Save</button>
+              <button type="button" data-new-run>New Run</button>
+            </div>
+            <div class="turn-chip" data-turn>Turn 0</div>
+            <button type="button" class="panel-toggle" data-panel-toggle aria-controls="run-side-panel" aria-expanded="false">Menu</button>
+          </div>
         </div>
         <div class="board-frame">
           <div class="board" data-board tabindex="0" aria-label="Dungeon map"></div>
         </div>
-        <div class="action-row">
-          <button type="button" data-act="up" aria-label="Move up">^</button>
-          <button type="button" data-act="left" aria-label="Move left">&lt;</button>
-          <button type="button" data-act="down" aria-label="Move down">v</button>
-          <button type="button" data-act="right" aria-label="Move right">&gt;</button>
-          <button type="button" data-interact>Interact</button>
-          <button type="button" data-rest>Rest</button>
-          <button type="button" data-next-beat>New Beat</button>
-          <button type="button" data-save>Save</button>
-          <button type="button" data-new-run>New Run</button>
-        </div>
       </section>
 
-      <aside class="side-panel" aria-label="Run details">
+      <aside class="side-panel" id="run-side-panel" aria-label="Run details">
         <nav class="panel-tabs" aria-label="Run menu">
           <button type="button" class="is-selected" aria-pressed="true" data-panel-tab="hero">Hero</button>
           <button type="button" aria-pressed="false" data-panel-tab="quest">Quest</button>

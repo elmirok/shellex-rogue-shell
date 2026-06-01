@@ -18,6 +18,7 @@ const dom = {
   providerChoices: Array.from(document.querySelectorAll("[data-provider-choice]")),
   board: document.querySelector("[data-board]"),
   boardFrame: document.querySelector(".board-frame"),
+  sidePanel: document.querySelector(".side-panel"),
   engineStatus: document.querySelector("[data-engine-status]"),
   floorLabel: document.querySelector("[data-floor-label]"),
   placeName: document.querySelector("[data-place-name]"),
@@ -39,6 +40,7 @@ const dom = {
   modelNote: document.querySelector("[data-model-note]"),
   panelTabs: Array.from(document.querySelectorAll("[data-panel-tab]")),
   panelPages: Array.from(document.querySelectorAll("[data-panel-page]")),
+  panelToggle: document.querySelector("[data-panel-toggle]"),
   rest: document.querySelector("[data-rest]"),
   interact: document.querySelector("[data-interact]"),
   nextBeat: document.querySelector("[data-next-beat]"),
@@ -66,6 +68,7 @@ let composer = null;
 let boardObserver = null;
 let setupSettings = { provider: "procedural" };
 let activePanel = "hero";
+let sidePanelOpen = false;
 
 function bindUi() {
   dom.start.addEventListener("click", () => startRun());
@@ -78,6 +81,7 @@ function bindUi() {
   dom.prepareQwen.addEventListener("click", () => prepareQwen());
   dom.musicToggle.addEventListener("click", () => toggleMusic());
   dom.inventory.addEventListener("click", (event) => handleInventoryClick(event));
+  dom.panelToggle.addEventListener("click", () => setSidePanelOpen(!sidePanelOpen));
   dom.providerChoices.forEach((button) => {
     button.addEventListener("click", () => setProviderChoice(button.dataset.providerChoice));
   });
@@ -99,6 +103,11 @@ function bindUi() {
     const active = document.activeElement;
     const typing = active && ["TEXTAREA", "INPUT", "SELECT"].includes(active.tagName);
     if (typing) return;
+    if (key === "escape" && sidePanelOpen) {
+      event.preventDefault();
+      setSidePanelOpen(false);
+      return;
+    }
     const moves = {
       arrowup: [0, -1],
       w: [0, -1],
@@ -139,6 +148,7 @@ function bindUi() {
   window.addEventListener("freeze", () => stopMusicForLifecycle("score paused"));
   syncSetupDirector();
   syncPanelTabs();
+  syncSidePanel();
 }
 
 async function startRun() {
@@ -246,6 +256,7 @@ async function saveRun(announce = false) {
 function showPlay() {
   dom.setup.hidden = true;
   dom.play.hidden = false;
+  setSidePanelOpen(false);
   dom.app.classList.add("is-playing");
   dom.shell.classList.add("is-playing");
   dom.headerMode.textContent = "Run in progress";
@@ -539,6 +550,36 @@ function syncSetupDirector(note) {
 function setActivePanel(panel) {
   activePanel = ["hero", "quest", "pack", "director"].includes(panel) ? panel : "hero";
   syncPanelTabs();
+}
+
+function setSidePanelOpen(open) {
+  sidePanelOpen = Boolean(open);
+  syncSidePanel();
+}
+
+function syncSidePanel() {
+  dom.play.classList.toggle("is-panel-open", sidePanelOpen);
+  dom.play.classList.toggle("is-panel-collapsed", !sidePanelOpen);
+  dom.panelToggle.textContent = sidePanelOpen ? "Hide" : "Menu";
+  dom.panelToggle.setAttribute("aria-expanded", sidePanelOpen ? "true" : "false");
+  dom.sidePanel.setAttribute("aria-hidden", sidePanelOpen ? "false" : "true");
+  dom.sidePanel.toggleAttribute("inert", !sidePanelOpen);
+  dom.sidePanel.querySelectorAll("button, input, select, textarea, a[href], [tabindex]").forEach((element) => {
+    if (!(element instanceof HTMLElement)) return;
+    if (!sidePanelOpen) {
+      if (!element.dataset.originalTabindex) {
+        element.dataset.originalTabindex = element.getAttribute("tabindex") ?? "none";
+      }
+      element.setAttribute("tabindex", "-1");
+      return;
+    }
+    if (element.dataset.originalTabindex === "none") {
+      element.removeAttribute("tabindex");
+    } else if (element.dataset.originalTabindex) {
+      element.setAttribute("tabindex", element.dataset.originalTabindex);
+    }
+    delete element.dataset.originalTabindex;
+  });
 }
 
 function syncPanelTabs() {
