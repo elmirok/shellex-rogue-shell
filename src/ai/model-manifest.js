@@ -12,8 +12,10 @@ export const AI_MODES = Object.freeze({
     adapter: "webllm",
     modelId: "Qwen3-0.6B-q4f16_0-MLC",
     modelUrl: "https://huggingface.co/mlc-ai/Qwen3-0.6B-q4f16_0-MLC",
+    modelLibUrl: "",
     minRam: "8GB recommended",
-    storage: "2-3GB recommended"
+    storage: "2-3GB recommended",
+    status: "Needs a WebLLM model_lib manifest before real local loading is enabled."
   },
   dungeon_master: {
     label: "AI Dungeon Master",
@@ -21,8 +23,10 @@ export const AI_MODES = Object.freeze({
     adapter: "webllm",
     modelId: "Qwen3-1.7B-q4f16_0-MLC",
     modelUrl: "https://huggingface.co/mlc-ai/Qwen3-1.7B-q4f16_0-MLC",
+    modelLibUrl: "",
     minRam: "16GB recommended",
-    storage: "4-6GB recommended"
+    storage: "4-6GB recommended",
+    status: "Needs a WebLLM model_lib manifest before real local loading is enabled."
   },
   high_quality: {
     label: "High Quality Local",
@@ -30,12 +34,13 @@ export const AI_MODES = Object.freeze({
     adapter: "webllm",
     modelId: "Qwen3-4B-q4f16_0-MLC",
     modelUrl: "https://huggingface.co/mlc-ai/Qwen3-4B-q4f16_0-MLC",
+    modelLibUrl: "",
     minRam: "24-32GB recommended",
-    storage: "8-12GB recommended"
+    storage: "8-12GB recommended",
+    status: "Needs a WebLLM model_lib manifest before real local loading is enabled."
   }
 });
 
 export function modelProfile(mode) {
   return AI_MODES[mode] || AI_MODES.classic;
 }
-

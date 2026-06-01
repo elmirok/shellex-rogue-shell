@@ -283,6 +283,7 @@ Smoke coverage currently checks symbol registry, theme presets, d20 math, combat
 ## Known Limits
 
 - WebLLM model loading is adapter-ready but remains browser and iframe policy dependent.
+- The Qwen AI Lite profiles are selectable today, but real WebLLM loading is intentionally preflight-blocked until a matching `model_lib` URL is added to the model manifest.
 - Only room flavor currently uses the AI router.
 - Fog of war uses radius visibility, not full shadow-casting.
 - Save migration preserves old saves, but older procedural floor content keeps its existing layout until a new run or floor is generated.

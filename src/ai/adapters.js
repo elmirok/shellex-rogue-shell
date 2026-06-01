@@ -71,10 +71,21 @@ export class WebLLMAIAdapter extends NullAIAdapter {
     if (this.ready) return true;
     if (!("gpu" in navigator)) throw new Error("WebGPU is unavailable in this browser.");
     if (!this.profile?.modelId) throw new Error("No WebLLM model profile selected.");
+    if (!this.profile?.modelLibUrl && !this.profile?.prebuilt) {
+      throw new Error(`${this.profile.label || this.profile.modelId} is not yet wired to a WebLLM model_lib. Template fallback remains active.`);
+    }
     progress("Importing WebLLM");
     const webllm = await import("https://esm.run/@mlc-ai/web-llm");
     progress(`Loading ${this.profile.modelId}`);
+    const appConfig = this.profile.prebuilt ? undefined : {
+      model_list: [{
+        model: this.profile.modelUrl,
+        model_id: this.profile.modelId,
+        model_lib: this.profile.modelLibUrl
+      }]
+    };
     this.engine = await webllm.CreateMLCEngine(this.profile.modelId, {
+      appConfig,
       initProgressCallback: (event) => progress(event?.text || "Loading model")
     });
     this.ready = true;

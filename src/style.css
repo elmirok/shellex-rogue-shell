@@ -346,6 +346,15 @@ textarea {
   padding-top: 12px;
 }
 
+.setup-status {
+  border: 1px solid rgba(116, 210, 255, 0.18);
+  background: rgba(7, 11, 13, 0.36);
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: #d9e0df;
+  line-height: 1.3;
+}
+
 .setup-card-head {
   display: flex;
   align-items: center;

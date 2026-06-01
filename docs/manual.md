@@ -20,6 +20,7 @@ AI Lite:
 - Optional small local narrator
 - Intended for Qwen3-0.6B WebLLM/MLC packs
 - Best with WebGPU and 8GB RAM
+- Falls back to template narration until a WebLLM model library is configured
 
 AI Dungeon Master:
 

@@ -35,6 +35,7 @@ const dom = {
   load: document.querySelector("[data-load]"),
   setupDirector: document.querySelector("[data-setup-director]"),
   setupModelNote: document.querySelector("[data-setup-model-note]"),
+  aiSetupStatus: document.querySelector("[data-ai-setup-status]"),
   prepareQwen: document.querySelector("[data-prepare-qwen]"),
   providerChoices: Array.from(document.querySelectorAll("[data-provider-choice]")),
   board: document.querySelector("[data-board]"),
@@ -115,6 +116,8 @@ let boardObserver = null;
 let setupSettings = { ...DEFAULT_SETTINGS };
 let activePanel = "hero";
 let sidePanelOpen = false;
+let localAiReady = false;
+let lastAiStatus = "AI status: Classic templates ready.";
 
 function bindUi() {
   dom.start.addEventListener("click", () => startRun());
@@ -232,6 +235,12 @@ function bindUi() {
   window.addEventListener("pagehide", disposeMusicForLifecycle);
   window.addEventListener("beforeunload", disposeMusicForLifecycle);
   window.addEventListener("freeze", () => stopMusicForLifecycle("score paused"));
+  window.addEventListener("error", (event) => {
+    reportAiStatus(`Runtime warning: ${event.message || "unknown script error"}`, "error");
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    reportAiStatus(`Runtime warning: ${event.reason?.message || event.reason || "unhandled promise rejection"}`, "error");
+  });
   syncSetupDirector();
   applySettingsToUi(setupSettings);
   refreshVoiceList();
@@ -245,10 +254,10 @@ async function startRun() {
   if (busy) return;
   syncSettingsFromUi();
   const requestedProvider = setupSettings.provider;
-  if (requestedProvider === "qwen" && !qwen.ready) {
-    await prepareQwen();
+  const activeProvider = requestedProvider === "qwen" ? "qwen" : "procedural";
+  if (requestedProvider === "qwen" && !localAiReady) {
+    reportAiStatus("AI Lite selected. Starting with template narration until a local model is prepared.", "warn");
   }
-  const activeProvider = requestedProvider === "qwen" && qwen.ready ? "qwen" : "procedural";
   const storyPrompt = (dom.prompt.value || DEFAULT_PROMPT).trim().slice(0, 1200);
   const seed = hashString(`${storyPrompt}:${Date.now()}`);
   const settings = {
@@ -702,14 +711,13 @@ async function requestStoryBeat() {
 
 async function prepareQwen() {
   if (busy) return false;
-  const previous = { ...setupSettings };
   setupSettings.provider = "qwen";
   setupSettings.aiNarrator = "local";
   setupSettings.aiMode = setupSettings.aiMode === "classic" ? "lite" : setupSettings.aiMode;
   applySettingsToUi(setupSettings);
   syncSetupDirector("Preparing optional local AI...");
-  const ready = await prepareLocalAi();
-  if (!ready) setupSettings = { ...previous, provider: "procedural" };
+  reportAiStatus("Preparing AI Lite. Gameplay remains available if this fails.", "info");
+  const ready = await prepareLocalAi({ keepSelection: true });
   syncSetupDirector();
   return ready;
 }
@@ -719,7 +727,11 @@ function setProviderChoice(provider) {
   setupSettings.provider = provider === "qwen" ? "qwen" : "procedural";
   setupSettings.aiNarrator = provider === "qwen" ? "local" : "template";
   setupSettings.aiMode = provider === "qwen" && setupSettings.aiMode === "classic" ? "lite" : setupSettings.aiMode;
+  if (provider !== "qwen") localAiReady = false;
   applySettingsToUi(setupSettings);
+  reportAiStatus(provider === "qwen"
+    ? "AI Lite selected. Press Prepare AI Lite to try local model loading, or start with template fallback."
+    : "Classic Mode selected. No model download, no server, no key.", provider === "qwen" ? "warn" : "info");
   syncSetupDirector();
 }
 
@@ -739,12 +751,15 @@ function syncSetupDirector(note) {
   if (note) {
     dom.setupModelNote.textContent = note;
   } else if (wantsQwen) {
-    dom.setupModelNote.textContent = "Optional local Qwen3-compatible narrator. Gameplay still works without it.";
+    dom.setupModelNote.textContent = localAiReady
+      ? "AI Lite local model ready."
+      : "AI Lite selected. Local model is optional; template fallback is active until preparation succeeds.";
   } else {
     dom.setupModelNote.textContent = "Classic Mode: no model download, no server, no key.";
   }
+  if (dom.aiSetupStatus) dom.aiSetupStatus.textContent = lastAiStatus;
   if (!state || dom.play.hidden) {
-    dom.headerMode.textContent = wantsQwen ? "AI Narrator Optional" : "Story Director Ready";
+    dom.headerMode.textContent = wantsQwen ? localAiReady ? "AI Lite Ready" : "AI Lite Fallback Ready" : "Story Director Ready";
   }
 }
 
@@ -845,7 +860,10 @@ function syncSettingsFromUi() {
 function refreshAiProfileNote(settings = currentSettings()) {
   if (!dom.aiProfileNote) return;
   const profile = modelProfile(settings.aiMode);
-  dom.aiProfileNote.textContent = `${profile.label}: ${profile.description} ${profile.minRam}; ${profile.storage}.`;
+  const stateText = settings.aiNarrator === "local"
+    ? localAiReady ? "Local model ready." : "Template fallback active until Prepare succeeds."
+    : "No local model will be loaded.";
+  dom.aiProfileNote.textContent = `${profile.label}: ${profile.description} ${profile.minRam}; ${profile.storage}. ${profile.status || stateText} ${stateText}`;
   if (dom.prepareLocalAi) {
     dom.prepareLocalAi.disabled = settings.aiNarrator !== "local" || busy;
   }
@@ -882,38 +900,79 @@ function refreshFeatureStatus() {
   dom.featureStatus.textContent = `${webgpu}; ${speech}; ${storage}; ${lowEnd}. Local models are optional.`;
 }
 
-async function prepareLocalAi() {
+async function prepareLocalAi(_options = {}) {
   if (busy) return false;
   syncSettingsFromUi();
   const settings = currentSettings();
   if (settings.aiNarrator !== "local") {
-    setEngine("Classic narrator active");
+    reportAiStatus("Classic narrator active. Select AI Lite or Local Model first.", "info");
     return false;
   }
-  if (!modelProfile(settings.aiMode).modelId) {
-    setEngine("Select AI Lite or higher");
+  const profile = modelProfile(settings.aiMode);
+  if (!profile.modelId) {
+    reportAiStatus("Select AI Lite or higher before preparing a local model.", "warn");
+    return false;
+  }
+  const capabilityProblem = localAiCapabilityProblem(profile);
+  if (capabilityProblem) {
+    localAiReady = false;
+    reportAiStatus(`${capabilityProblem} Template narration remains active.`, "error");
     return false;
   }
   busy = true;
   refreshAiProfileNote(settings);
-  setEngine("Preparing local AI");
+  reportAiStatus(`Preparing ${profile.label}: importing browser model runtime.`, "info");
   try {
     aiRouter.configure(settings);
     await aiRouter.warm((message) => {
-      setEngine(message);
-      if (dom.aiProfileNote) dom.aiProfileNote.textContent = message;
+      reportAiStatus(message, "info");
+      if (dom.aiProfileNote) dom.aiProfileNote.textContent = `Preparing ${profile.label}: ${message}`;
     });
-    setEngine("Local AI ready");
+    localAiReady = true;
+    reportAiStatus(`${profile.label} ready. Local narration will be used for new flavor text.`, "success");
     if (dom.aiProfileNote) dom.aiProfileNote.textContent = `${aiModeLabel(settings.aiMode)} ready.`;
     return true;
   } catch (error) {
-    setEngine("Template fallback");
-    if (state) appendLog(`Local AI unavailable: ${error.message}. Template narrator stays active.`);
-    await api.ui.notify(`Rogue Shell: ${error.message}. Classic Mode remains playable.`);
+    localAiReady = false;
+    const message = localAiErrorMessage(error);
+    reportAiStatus(`${message} Template narration remains active.`, "error");
+    await api.ui.notify(`Rogue Shell: ${message}`);
+    setEngine("AI fallback");
     return false;
   } finally {
     busy = false;
     refreshAiProfileNote(settings);
+    render();
+  }
+}
+
+function localAiCapabilityProblem(profile) {
+  if (profile?.adapter === "webllm" && !profile.modelLibUrl && !profile.prebuilt) {
+    return `${profile.label} is selectable for fallback testing, but real local loading needs a WebLLM model_lib manifest first.`;
+  }
+  if (!("gpu" in navigator)) return "WebGPU is unavailable in this browser frame.";
+  if (!window.isSecureContext) return "Local AI needs a secure browser context.";
+  return "";
+}
+
+function localAiErrorMessage(error) {
+  const message = String(error?.message || error || "Local AI failed to load.");
+  if (/Failed to fetch|Load failed|Importing|import/i.test(message)) {
+    return `Local AI runtime could not be imported (${message}).`;
+  }
+  if (/WebGPU|gpu/i.test(message)) return message;
+  return `Local AI unavailable: ${message}.`;
+}
+
+function reportAiStatus(message, level = "info") {
+  const prefix = level === "error" ? "AI warning" : level === "success" ? "AI ready" : "AI status";
+  lastAiStatus = `${prefix}: ${message}`;
+  setEngine(level === "error" ? "AI fallback" : level === "success" ? "AI ready" : "AI status");
+  if (dom.aiSetupStatus) dom.aiSetupStatus.textContent = lastAiStatus;
+  if (dom.setupModelNote && (!state || dom.setup.hidden === false)) dom.setupModelNote.textContent = message;
+  if (dom.aiProfileNote) dom.aiProfileNote.textContent = message;
+  if (state) {
+    appendLog(lastAiStatus);
     render();
   }
 }
@@ -981,7 +1040,11 @@ function aiModeLabel(mode) {
 
 function modelStatusText(settings = {}) {
   if (settings.aiNarrator === "off") return "AI narration is off. The deterministic engine is in full control.";
-  if (settings.aiNarrator === "local") return "Local model narration is optional and falls back to templates if unavailable.";
+  if (settings.aiNarrator === "local") {
+    return localAiReady
+      ? "Local model narration is ready for new flavor text."
+      : "AI Lite is selected, but template fallback is active until local model preparation succeeds.";
+  }
   if (settings.aiNarrator === "mock") return "Mock local AI is active for development; gameplay remains deterministic.";
   return "Classic Mode template narration is active. No model download is required.";
 }

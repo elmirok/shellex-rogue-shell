@@ -15,7 +15,7 @@ Gameplay never requires a backend, account, API key, paid inference, database, t
 ## Modes
 
 - Classic Mode: no AI model. Procedural dungeon, d20-style combat, templates, WebAudio music, optional browser voice.
-- AI Lite: optional local narrator profile, intended for Qwen3-0.6B WebLLM/MLC-compatible packs. 8GB RAM and 2-3GB free storage recommended.
+- AI Lite: optional local narrator profile, intended for Qwen3-0.6B WebLLM/MLC-compatible packs. 8GB RAM and 2-3GB free storage recommended. In this build it stays playable with template fallback; real model loading needs a WebLLM `model_lib` manifest URL.
 - AI Dungeon Master: optional richer local storytelling profile, intended for Qwen3-1.7B packs. 16GB RAM and 4-6GB free storage recommended.
 - High Quality Local: opt-in stronger profile, intended for Qwen3-4B packs on strong desktop hardware. 24-32GB RAM and 8-12GB free storage recommended.
 
